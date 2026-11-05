@@ -119,12 +119,24 @@ function sendAuthResult(res, result) {
 <p id="msg">Concluindo login…</p>
 <script>
   var result = ${json};
-  if (window.opener) {
-    window.opener.postMessage({ type: 'giffu-auth', ok: result.ok, error: result.error || null }, location.origin);
-    window.close();
-  } else if (result.ok) {
-    location.replace(result.mode === 'author' ? '/author' : '/');
-  } else {
+  var delivered = false;
+  if (window.opener && window.opener !== window) {
+    try {
+      window.opener.postMessage({ type: 'giffu-auth', ok: result.ok, error: result.error || null }, location.origin);
+      delivered = true;
+      window.close();
+    } catch (e) {}
+  }
+  if (!delivered && result.ok) {
+    var returnUrl = (function() {
+      try {
+        var s = sessionStorage.getItem('giffu_auth_return');
+        if (s) { sessionStorage.removeItem('giffu_auth_return'); return s; }
+      } catch (e) {}
+      return result.mode === 'author' ? '/author' : '/';
+    })();
+    location.replace(returnUrl);
+  } else if (!delivered) {
     document.getElementById('msg').textContent = result.error || 'Não foi possível entrar com o Google.';
   }
 </script></body></html>`);

@@ -10230,6 +10230,60 @@ class EntregaApp {
     return null;
   }
 
+  getItemShareLink(ctxItem) {
+    if (!ctxItem) return null;
+
+    // 1. Diretório / Projeto (project)
+    if (ctxItem.type === 'project') {
+      const proj = ctxItem.item;
+      if (!proj) return null;
+      if (this.isClientMode && proj.allowShare === false) {
+        return null;
+      }
+      const code = proj.shortCode || proj.slug || proj.id;
+      return {
+        url: `${window.location.origin}/${code}`,
+        code: code,
+        title: proj.name || 'Diretório'
+      };
+    }
+
+    // 2. Pasta interna (folder)
+    if (ctxItem.type === 'folder') {
+      const folder = ctxItem.item;
+      const proj = ctxItem.project || (this.data && this.data.projects ? this.data.projects.find(p => p.id === ctxItem.projectId) : this.selectedProject);
+      if (!folder) return null;
+      if (this.isClientMode && proj && !this.isShareAllowedForFolder(folder, proj)) {
+        return null;
+      }
+      const code = folder.shortCode || folder.id;
+      return {
+        url: `${window.location.origin}/${code}`,
+        code: code,
+        title: folder.name || 'Pasta'
+      };
+    }
+
+    // 3. Arquivo / Mídia (file)
+    if (ctxItem.type === 'file') {
+      const file = ctxItem.item;
+      const proj = ctxItem.project || (this.data && this.data.projects ? this.data.projects.find(p => p.id === ctxItem.projectId) : this.selectedProject);
+      if (!file) return null;
+      if (this.isClientMode && proj && !this.isShareAllowedForVideo(file, proj)) {
+        return null;
+      }
+      const code = file.shortCode || file.id;
+      return {
+        url: `${window.location.origin}/${code}`,
+        code: code,
+        title: file.fileName || file.title || 'Arquivo'
+      };
+    }
+
+    // Categorias e divisões não possuem links de compartilhamento do cliente
+    return null;
+  }
+
   setupUniversalContextMenu() {
     const menu = document.getElementById('appUniversalContextMenu');
     if (!menu) return;
@@ -10352,6 +10406,37 @@ class EntregaApp {
         this.openEditFolderModal(item.item, item.project);
       } else if (item.type === 'file') {
         this.openEditMediaModal(item.item, item.project);
+      }
+    });
+
+    // Action 2.1: Copiar Link (Apenas itens compartilháveis)
+    const btnCopyLink = document.getElementById('ctxBtnCopyLink');
+    btnCopyLink?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const item = this.activeUniversalContextItem;
+      this.closeUniversalContextMenu();
+      if (!item) return;
+
+      const shareInfo = this.getItemShareLink(item);
+      if (shareInfo && shareInfo.url) {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(shareInfo.url);
+          } else {
+            const textarea = document.createElement('textarea');
+            textarea.value = shareInfo.url;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+          }
+          window.showToast(`Link copiado: .../${shareInfo.code}`);
+        } catch (err) {
+          console.error('Falha ao copiar link:', err);
+          window.showToast('Erro ao copiar link', 'error');
+        }
       }
     });
 
@@ -10497,6 +10582,13 @@ class EntregaApp {
     if (titleEl) titleEl.textContent = ctxItem.title;
     if (iconWrap) iconWrap.innerHTML = iconSvg;
     if (colorDot) colorDot.style.backgroundColor = curColor;
+
+    // Copiar Link: Visível para itens que podem compartilhar o link (diretório, pasta, arquivo)
+    const btnCopyLink = document.getElementById('ctxBtnCopyLink');
+    if (btnCopyLink) {
+      const shareInfo = this.getItemShareLink(ctxItem);
+      btnCopyLink.style.display = shareInfo ? 'flex' : 'none';
+    }
 
     // Arquivar: Visível APENAS para diretórios (project)
     const btnArchive = document.getElementById('ctxBtnArchive');

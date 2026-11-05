@@ -93,7 +93,13 @@ function isSecureRequest(req) {
 }
 
 function baseUrl(req) {
-  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/+$/, '');
+  if (process.env.PUBLIC_URL) {
+    let pUrl = process.env.PUBLIC_URL.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(pUrl)) {
+      pUrl = 'https://' + pUrl;
+    }
+    return pUrl;
+  }
   return `${isSecureRequest(req) ? 'https' : 'http'}://${req.headers.host}`;
 }
 

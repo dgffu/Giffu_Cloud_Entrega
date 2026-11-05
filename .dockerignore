@@ -1,0 +1,12 @@
+node_modules/
+data/
+.giffu-entrega/
+.git/
+.env
+.env.*
+*.log
+scratch/
+test_zip.zip
+.DS_Store
+Thumbs.db
+

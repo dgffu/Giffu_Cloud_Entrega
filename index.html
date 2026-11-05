@@ -1,0 +1,1252 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Giffú Cloud</title>
+  <meta name="description" content="Plataforma minimalista e elegante para entrega de vídeos e projetos audiovisuais de alta qualidade.">
+  <meta name="referrer" content="same-origin">
+  <link rel="icon" type="image/svg+xml" href="/assets/Cloud_Entrega.svg">
+  <link rel="alternate icon" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="screen-orientation" content="portrait">
+  <meta name="x5-orientation" content="portrait">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/player.css">
+  <link rel="stylesheet" href="/css/annotation.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-brand" id="headerBrand">
+        <!-- Mobile Hamburger Menu Button (replaces brand title on mobile) -->
+        <button class="mobile-menu-btn" id="btnMobileMenuToggle" aria-label="Abrir Menu de Diretórios e Categorias" title="Navegação">
+          <svg class="hamburger-icon-svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line class="line-1" x1="4" y1="6" x2="20" y2="6"></line>
+            <line class="line-2" x1="4" y1="12" x2="20" y2="12"></line>
+            <line class="line-3" x1="4" y1="18" x2="20" y2="18"></line>
+          </svg>
+        </button>
+        <!-- Distinctive Orange Brand Badge (Wireframe rule) -->
+        <div class="brand-badge desktop-brand-badge" id="btnHeaderLobby">
+          <svg class="brand-badge-logo" viewBox="0 0 1585.74 1030.98" width="22" height="15" fill="currentColor" aria-hidden="true"><path fill="currentColor" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/><path fill="currentColor" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/><g><path fill="currentColor" d="M331.2,1024.8c-26.64-5.22-52.18-13.64-76.22-24.84C106.1,944.84,0,801.6,0,633.58c0-195.39,143.43-357.25,330.76-386.04-22.01,27.86-34.3,62.6-34.3,99.73v577.31c0,29.93,8.07,58.96,23.33,83.94,3.46,5.66,7.27,11.1,11.41,16.28Z"/><path fill="currentColor" d="M1585.74,693.33c0,122.09-69.26,228.03-170.62,280.62-53.46,36.06-117.43,57.03-186.14,57.03h-636.4l444.28-272.6c49.44-30.34,78.18-83.07,76.87-141.06-1.31-58-32.4-109.38-83.16-137.46l-494.84-273.69c-12.02-6.65-24.56-11.66-37.37-15.05C589.85,74.73,731.91,0,891.42,0c240.88,0,441.95,170.45,489.19,397.33,119.84,44.92,205.13,160.48,205.13,296Z"/></g><g><path fill="currentColor" d="M955.63,698.49l-434.14,266.38c-.14.09-.28.17-.42.25-27.71,16.8-61.1,17.39-89.41,1.54-28.45-15.92-45.44-44.9-45.44-77.5v-506.49c0-31.77,16.34-60.37,43.7-76.51,10.63-6.26,22.1-10.17,33.79-11.69,4.21.59,8.39,1.25,12.55,1.98.52-.89,1.04-1.79,1.57-2.68,13.79.45,27.53,4.17,40.2,11.18l13.91,7.69,420.23,232.42c27.96,15.46,45.09,43.77,45.81,75.71.72,31.94-15.11,60.99-42.34,77.71Z"/><path fill="currentColor" d="M477.83,293.78c-.53.89-1.05,1.78-1.57,2.68-4.16-.74-8.33-1.4-12.55-1.98,3.75-.49,7.53-.74,11.3-.74.94,0,1.88.02,2.82.04Z"/></g></svg>
+          <span class="brand-author-name">Giffú</span>
+          <span class="app-subtitle">Cloud</span>
+        </div>
+      </div>
+
+      <div class="header-right" id="headerRight">
+        <div class="author-header-group">
+          <span class="header-mode-tag">Versão Autor</span>
+          <div class="notifications-bell-mount" id="notificationsBellMount"></div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Author Google Login Screen Gate -->
+    <div id="authorLoginGate" class="login-gate-container" style="display: none;">
+      <div class="login-gate-card">
+        <div class="brand-badge" style="margin-bottom: 24px;">
+          <svg class="brand-badge-logo" viewBox="0 0 1585.74 1030.98" width="22" height="15" fill="currentColor" aria-hidden="true"><path fill="currentColor" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/><path fill="currentColor" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/><g><path fill="currentColor" d="M331.2,1024.8c-26.64-5.22-52.18-13.64-76.22-24.84C106.1,944.84,0,801.6,0,633.58c0-195.39,143.43-357.25,330.76-386.04-22.01,27.86-34.3,62.6-34.3,99.73v577.31c0,29.93,8.07,58.96,23.33,83.94,3.46,5.66,7.27,11.1,11.41,16.28Z"/><path fill="currentColor" d="M1585.74,693.33c0,122.09-69.26,228.03-170.62,280.62-53.46,36.06-117.43,57.03-186.14,57.03h-636.4l444.28-272.6c49.44-30.34,78.18-83.07,76.87-141.06-1.31-58-32.4-109.38-83.16-137.46l-494.84-273.69c-12.02-6.65-24.56-11.66-37.37-15.05C589.85,74.73,731.91,0,891.42,0c240.88,0,441.95,170.45,489.19,397.33,119.84,44.92,205.13,160.48,205.13,296Z"/></g><g><path fill="currentColor" d="M955.63,698.49l-434.14,266.38c-.14.09-.28.17-.42.25-27.71,16.8-61.1,17.39-89.41,1.54-28.45-15.92-45.44-44.9-45.44-77.5v-506.49c0-31.77,16.34-60.37,43.7-76.51,10.63-6.26,22.1-10.17,33.79-11.69,4.21.59,8.39,1.25,12.55,1.98.52-.89,1.04-1.79,1.57-2.68,13.79.45,27.53,4.17,40.2,11.18l13.91,7.69,420.23,232.42c27.96,15.46,45.09,43.77,45.81,75.71.72,31.94-15.11,60.99-42.34,77.71Z"/><path fill="currentColor" d="M477.83,293.78c-.53.89-1.05,1.78-1.57,2.68-4.16-.74-8.33-1.4-12.55-1.98,3.75-.49,7.53-.74,11.3-.74.94,0,1.88.02,2.82.04Z"/></g></svg>
+          <span class="brand-author-name">Giffú</span>
+          <span class="app-subtitle">Cloud</span>
+        </div>
+
+        <h2 class="login-gate-title">Acesso do Autor</h2>
+        <div id="authorGateNotice" style="display: none; background: rgba(255, 84, 0, 0.1); border: 1px solid rgba(255, 84, 0, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 12px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.4;"></div>
+
+        <!-- Connect with Google button -->
+        <button class="btn-google-login-large" id="btnConnectAuthorDriveGoogle">
+          <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+          <span>Fazer login como Autor</span>
+        </button>
+        <p id="authorLoginError" role="alert" style="margin-top: 14px; font-size: 12px; line-height: 1.5; color: #ef4444; min-height: 0;"></p>
+
+        <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-muted); display: flex; gap: 12px; justify-content: center;">
+          <a href="/privacidade" target="_blank" style="color: var(--text-secondary); text-decoration: none;">Privacidade</a>
+          <span>•</span>
+          <a href="/termos" target="_blank" style="color: var(--text-secondary); text-decoration: none;">Termos de Serviço</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- App Container -->
+    <div class="app-container">
+      <!-- Sidebar (Author View Only) -->
+      <aside class="author-sidebar" id="authorSidebar">
+        <div class="sidebar-top-section">
+          <div class="sidebar-header">
+            <span class="sidebar-title">Diretórios</span>
+            <div class="sidebar-header-actions" style="display: flex; align-items: center; gap: 6px;">
+              <button class="btn-sidebar-icon" id="btnEditCategories" title="Editar Categorias" aria-label="Editar Categorias">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                </svg>
+              </button>
+              <div class="sidebar-add-wrapper" id="sidebarAddWrapper">
+                <button class="btn-add-dir" id="btnAddMenuToggle" title="Adicionar">+</button>
+                <div class="sidebar-add-menu" id="sidebarAddMenu">
+                  <button type="button" class="sidebar-add-menu-item" id="btnAddDirectoryAction">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                    <span>+ Diretório</span>
+                  </button>
+                  <button type="button" class="sidebar-add-menu-item" id="btnAddCategoryAction">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/></svg>
+                    <span>+ Categoria</span>
+                  </button>
+                  <button type="button" class="sidebar-add-menu-item" id="btnAddDivisionAction">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16.5L6.5 9.5h11L12 16.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                    <span>+ Divisão</span>
+                  </button>
+                  <div class="sidebar-add-menu-divider"></div>
+                  <button type="button" class="sidebar-add-menu-item" id="btnAddAccountAction">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                    <span>+ Conta</span>
+                  </button>
+                </div>
+              </div>
+              <button class="btn-sidebar-close-mobile" id="btnSidebarCloseMobile" title="Fechar Menu" aria-label="Fechar Menu">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Directory Tree Grouped by Year -->
+          <div class="directory-tree" id="directoryTree">
+            <!-- Populated dynamically: ▼ 2026 ... -->
+          </div>
+        </div>
+
+        <!-- Sidebar Footer: Google Sync Status & Settings -->
+        <div class="sidebar-footer">
+          <div class="google-account-btn" id="sidebarGoogleProfile">
+            <img class="google-avatar" id="sidebarAuthorAvatar" src="https://lh3.googleusercontent.com/a/default-user=s96-c" alt="Foto de Perfil" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='/assets/default-avatar.svg';">
+            <div class="google-account-info">
+              <span class="google-account-name" id="sidebarAuthorName">Giffú</span>
+              <span class="google-account-sync">
+                <span id="sidebarAuthorEmail"></span>
+              </span>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <button class="sidebar-settings-btn" id="btnSidebarLogout" title="Sair da conta Google">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+            </button>
+            <button class="sidebar-settings-btn" id="btnSidebarSettings" title="Configurações do Sistema">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+      <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+      <!-- Main Content Area -->
+      <main class="main-content" id="mainContentArea">
+        <!-- Rendered dynamically: Gallery or Player -->
+      </main>
+    </div>
+
+    <!-- Floating Theme Toggle (Moon/Sun in Wireframe) -->
+    <button class="floating-theme-toggle" id="themeToggleBtn" title="Alternar Modo Escuro / Claro">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>
+    </button>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- MODAL: Adicionar Novo Diretório (Sketch 1) -->
+    <div class="modal-backdrop" id="modalAddDirectory">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title" id="titleModalAddDirectory">Novo Diretório</h3>
+          <button class="modal-close-btn">&times;</button>
+        </div>
+        <form id="formAddDirectory">
+          <div class="modal-body">
+            <!-- Cloud Storage / Drive Link -->
+            <div class="form-group">
+              <label class="form-label" id="labelNewProjDrive">Link (Google Drive, Dropbox, OneDrive, Box, iCloud)</label>
+              <div class="drive-input-wrapper" style="position: relative; width: 100%; display: flex; align-items: center;">
+                <input type="url" id="newProjDrive" class="form-input font-mono" placeholder="Cole o link da pasta ou arquivo..." required style="width: 100%; box-sizing: border-box; padding-right: 38px;">
+                <div class="provider-detection-badge" id="newProjProviderBadge" title="Google Drive">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12.01 1.485c-2.082 0-3.754.02-3.743.047.01.02 1.708 3.001 3.774 6.62l3.76 6.574h3.76c2.081 0 3.753-.02 3.742-.047-.005-.02-1.708-3.001-3.775-6.62l-3.76-6.574zm-4.76 1.73a789.828 789.861 0 0 0-3.63 6.319L0 15.868l1.89 3.298 1.885 3.297 3.62-6.335 3.618-6.33-1.88-3.287C8.1 4.704 7.255 3.22 7.25 3.214zm2.259 12.653-.203.348c-.114.198-.96 1.672-1.88 3.287a423.93 423.948 0 0 1-1.698 2.97c-.01.026 3.24.042 7.222.042h7.244l1.796-3.157c.992-1.734 1.85-3.23 1.906-3.323l.104-.167h-7.249z"/></svg>
+                </div>
+              </div>
+            </div>
+
+            <!-- Project Name -->
+            <div class="form-group">
+              <label class="form-label" id="labelNewProjName">Nome do Projeto</label>
+              <input type="text" id="newProjName" class="form-input font-mono" placeholder="Ex: 261024-SIGEM-NOME DO PROJETO" required>
+            </div>
+
+            <!-- Custom Client Name -->
+            <div class="form-group">
+              <label class="form-label">Nome do Cliente</label>
+              <input type="text" id="newProjClient" class="form-input" placeholder="Ex: SIGEM Produções" required>
+            </div>
+
+            <!-- Project Category -->
+            <div class="form-group">
+              <label class="form-label">Categoria</label>
+              <select id="newProjCategory" class="form-input" required>
+              </select>
+            </div>
+
+            <!-- Project Division -->
+            <div class="form-group">
+              <label class="form-label">Divisão</label>
+              <select id="newProjDivision" class="form-input" required>
+              </select>
+            </div>
+
+            <!-- Password -->
+            <div class="form-group">
+              <label class="form-label">Senha de Acesso</label>
+              <input type="password" id="newProjPassword" class="form-input" placeholder="Opcional">
+            </div>
+
+            <!-- Comments Toggle -->
+            <label class="form-checkbox-row">
+              <input type="checkbox" id="newProjAllowComments" checked>
+              <span style="font-size: 13px; font-weight: 500;">Permitir comentários</span>
+            </label>
+
+            <!-- Hide Author Name Checkbox -->
+            <label class="form-checkbox-row">
+              <input type="checkbox" id="newProjHideBrand" checked>
+              <span id="labelNewProjHideBrand" style="font-size: 13px; font-weight: 500;">Ocultar o nome para o cliente</span>
+            </label>
+
+            <!-- Allow Client to Share Link Checkbox -->
+            <label class="form-checkbox-row">
+              <input type="checkbox" id="newProjAllowShare" checked>
+              <span style="font-size: 13px; font-weight: 500;">Permitir que cliente compartilhe o link</span>
+            </label>
+          </div>
+          <div class="modal-footer" style="justify-content: space-between;">
+            <div id="addDirectoryLoading" style="display: none; align-items: center; gap: 8px;">
+              <span class="loading-spinner"></span>
+              <span style="font-size: 12px; color: var(--text-secondary); font-weight: 500;">Espelhando diretório...</span>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: center; margin-left: auto;">
+              <button type="button" class="btn-secondary btn-modal-cancel">Cancelar</button>
+              <button type="submit" class="btn-primary" id="btnSubmitAddDirectory">Criar e Espelhar</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MODAL: Adicionar Nova Categoria -->
+    <div class="modal-backdrop" id="modalAddCategory">
+      <div class="modal-card" style="max-width: 440px;">
+        <div class="modal-header">
+          <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 7z"/></svg>
+            Nova Categoria
+          </h3>
+          <button class="modal-close-btn">&times;</button>
+        </div>
+        <form id="formAddCategory">
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label">Nome da Categoria</label>
+              <input type="text" id="newCategoryName" class="form-input" placeholder="Ex: Casamentos, Comerciais, Publicidade" required autocomplete="off">
+            </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <label class="form-label" style="margin-bottom: 0;">Cor da Categoria</label>
+                <span id="newCategoryColorLabel" style="font-size: 11.5px; font-weight: 700; color: #FF5400;">Padrão</span>
+              </div>
+              <input type="hidden" id="newCategoryColor" value="#FF5400">
+
+              <!-- Cor Padrão (Identidade) no topo -->
+              <button type="button" class="new-cat-default-btn selected" id="btnAddCatDefaultColor" data-color="#FF5400" data-name="Padrão">
+                <span class="new-cat-swatch-lg" style="background-color: #FF5400;"></span>
+                <div class="new-cat-default-info">
+                  <span class="new-cat-default-title">Padrão</span>
+                  <span class="new-cat-default-sub">Identidade Visual (Padrão)</span>
+                </div>
+                <span class="new-cat-check">✓</span>
+              </button>
+
+              <div class="new-cat-divider"></div>
+
+              <!-- Grid com as outras 14 cores vibrantes -->
+              <div class="new-cat-palette-grid" id="newCatPaletteGrid">
+                <button type="button" class="new-cat-swatch-btn" data-color="#EAB308" data-name="Amarelo" title="Amarelo" style="background-color: #EAB308;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#2563EB" data-name="Azul" title="Azul" style="background-color: #2563EB;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#16A34A" data-name="Verde" title="Verde" style="background-color: #16A34A;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#EC4899" data-name="Rosa" title="Rosa" style="background-color: #EC4899;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#9333EA" data-name="Roxo" title="Roxo" style="background-color: #9333EA;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#EF4444" data-name="Vermelho" title="Vermelho" style="background-color: #EF4444;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#8D5B4C" data-name="Marrom" title="Marrom" style="background-color: #8D5B4C;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#475569" data-name="Cinza Escuro" title="Cinza Escuro" style="background-color: #475569;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#94A3B8" data-name="Cinza Claro" title="Cinza Claro" style="background-color: #94A3B8;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#7C3AED" data-name="Violeta" title="Violeta" style="background-color: #7C3AED;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#06B6D4" data-name="Ciano" title="Ciano" style="background-color: #06B6D4;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#0284C7" data-name="Cerúleo" title="Cerúleo" style="background-color: #0284C7;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#D97706" data-name="Dourado" title="Dourado" style="background-color: #D97706;"></button>
+                <button type="button" class="new-cat-swatch-btn" data-color="#FB923C" data-name="Laranja Clarinho" title="Laranja Clarinho" style="background-color: #FB923C;"></button>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn-secondary btn-modal-cancel">Cancelar</button>
+            <button type="submit" class="btn-primary" id="btnSubmitCategory">Criar Categoria</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MODAL: Gerenciar Categorias (Editar nomes / Excluir) -->
+    <div class="modal-backdrop" id="modalManageCategories">
+      <div class="modal-card" style="max-width: 520px;">
+        <div class="modal-header">
+          <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            Editar Categorias
+          </h3>
+          <button class="modal-close-btn">&times;</button>
+        </div>
+        <div class="modal-body" style="padding-top: 16px;">
+          <!-- Aviso sobre regras de exclusão e arquivo -->
+          <div class="category-manage-info-box">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink: 0; margin-top: 2px;">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+            </svg>
+            <div style="font-size: 12px; line-height: 1.45; color: var(--text-secondary);">
+              Diretórios vinculados a uma categoria excluída serão movidos para o <strong>Arquivo</strong>. Se um diretório arquivado for restaurado depois, sua categoria será recriada junto automaticamente.
+            </div>
+          </div>
+
+          <!-- Lista de categorias existentes -->
+          <div class="category-manage-list" id="categoryManageList">
+            <!-- Gerado via JavaScript dinamicamente -->
+          </div>
+        </div>
+        <div class="modal-footer" style="justify-content: space-between;">
+          <button type="button" class="btn-secondary" id="btnManageOpenAddCategory" style="font-size: 13px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/></svg>
+            Nova Categoria
+          </button>
+          <button type="button" class="btn-primary btn-modal-cancel">Concluir</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: Editar Diretório Existente (Sketch 1) -->
+    <div class="modal-backdrop" id="modalEditProject">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title">Editar Diretório e Link Espelhado</h3>
+          <button class="modal-close-btn">&times;</button>
+        </div>
+        <form id="formEditProject">
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label">Nome do Projeto</label>
+              <input type="text" id="editProjName" class="form-input font-mono" required>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Link da Pasta do Google Drive</label>
+              <input type="url" id="editProjDrive" class="form-input font-mono" placeholder="https://drive.google.com/drive/folders/..." required>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Nome do Cliente</label>
+              <input type="text" id="editProjClient" class="form-input" required>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Categoria</label>
+              <select id="editProjCategory" class="form-input" required>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Divisão</label>
+              <select id="editProjDivision" class="form-input" required>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Senha de Acesso (Deixe em branco para remover)</label>
+              <input type="password" id="editProjPassword" class="form-input" placeholder="Sem senha">
+            </div>
+
+            <label class="form-checkbox-row">
+              <input type="checkbox" id="editProjAllowComments">
+              <span style="font-size: 13px; font-weight: 500;">Habilitar espaço para comentários</span>
+            </label>
+
+            <label class="form-checkbox-row">
+              <input type="checkbox" id="editProjHideBrand">
+              <span id="labelEditProjHideBrand" style="font-size: 13px; font-weight: 500;">Ocultar o nome para o cliente</span>
+            </label>
+
+            <label class="form-checkbox-row">
+              <input type="checkbox" id="editProjAllowShare" checked>
+              <span style="font-size: 13px; font-weight: 500;">Permitir que cliente compartilhe o link</span>
+            </label>
+          </div>
+          <div class="modal-footer" style="justify-content: space-between;">
+            <div style="display: flex; gap: 8px;">
+              <button type="button" class="btn-danger-outline" id="btnToggleArchiveProject" title="Mover este projeto para o Arquivo">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M20.54 5.23l-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23C3.17 5.57 3 6.02 3 6.5V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.48-.17-.93-.46-1.27zM12 17.5L6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z"/></svg>
+                <span id="labelToggleArchiveProject">Mover para Arquivo</span>
+              </button>
+              <button type="button" class="btn-danger-outline" id="btnDeleteArchivedProject" style="display: none;" title="Excluir este diretório do Cloud">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                <span>Excluir do Cloud</span>
+              </button>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button type="button" class="btn-secondary btn-modal-cancel">Cancelar</button>
+              <button type="submit" class="btn-primary">Salvar Alterações</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MODAL: Editar Arquivo / Mídia -->
+    <div class="modal-backdrop" id="modalEditMedia">
+      <div class="modal-card" style="max-width: 480px;">
+        <div class="modal-header">
+          <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            <span id="titleEditMediaModal">Editar Arquivo</span>
+          </h3>
+          <button class="modal-close-btn">&times;</button>
+        </div>
+        <form id="formEditMedia">
+          <div class="modal-body" style="padding-top: 14px;">
+            <div class="form-group">
+              <label class="form-label">Nome do Arquivo</label>
+              <input type="text" id="editMediaTitle" class="form-input font-mono" placeholder="Nome do arquivo" required>
+            </div>
+
+            <label class="form-checkbox-row" style="margin-top: 16px;">
+              <input type="checkbox" id="editMediaAllowComments">
+              <span style="font-size: 13px; font-weight: 500;">Habilitar espaço para comentários</span>
+            </label>
+
+            <label class="form-checkbox-row" style="margin-top: 12px;">
+              <input type="checkbox" id="editMediaHideBrand">
+              <span id="labelEditMediaHideBrand" style="font-size: 13px; font-weight: 500;">Ocultar o nome para o cliente</span>
+            </label>
+
+            <label class="form-checkbox-row" style="margin-top: 12px;">
+              <input type="checkbox" id="editMediaAllowShare" checked>
+              <span style="font-size: 13px; font-weight: 500;">Permitir que cliente compartilhe o link</span>
+            </label>
+          </div>
+          <div class="modal-footer" style="justify-content: flex-end; gap: 8px;">
+            <button type="button" class="btn-secondary btn-modal-cancel">Cancelar</button>
+            <button type="submit" class="btn-primary" id="btnSaveEditMedia">Salvar Alterações</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MODAL: Confirmação de Alteração de Nome no Google Drive -->
+    <div class="modal-backdrop" id="modalConfirmRenameMedia" style="z-index: 10005;">
+      <div class="modal-card" style="max-width: 440px;">
+        <div class="modal-header">
+          <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px; color: var(--brand-orange, #ff5400);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+            <span>Aviso do Google Drive</span>
+          </h3>
+          <button class="modal-close-btn" id="btnCancelRenameMediaX">&times;</button>
+        </div>
+        <div class="modal-body" style="padding-top: 14px;">
+          <p style="font-size: 13.5px; line-height: 1.55; color: var(--text-primary); margin: 0;">
+            A alteração no nome do arquivo afetará o <strong>NOME ORIGINAL</strong> no seu Google Drive. Tenha cuidado principalmente com a extensão do arquivo.
+          </p>
+        </div>
+        <div class="modal-footer" style="justify-content: flex-end; gap: 8px; margin-top: 16px;">
+          <button type="button" class="btn-secondary" id="btnCancelRenameMedia">Cancelar</button>
+          <button type="button" class="btn-primary" id="btnProceedRenameMedia">Proceder</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: Confirmação de Fixar Pasta como Novo Diretório -->
+    <div class="modal-backdrop" id="modalConfirmPinFolder" style="z-index: 10005;">
+      <div class="modal-card" style="max-width: 330px; padding: 22px 20px; text-align: center; border-radius: 14px; box-shadow: var(--shadow-xl);">
+        <div style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 20px; line-height: 1.4;">
+          Fixar como novo diretório?
+        </div>
+        <div style="display: flex; justify-content: center; gap: 12px;">
+          <button type="button" class="btn-secondary" id="btnCancelPinFolder" style="min-width: 84px; justify-content: center; padding: 8px 18px; font-weight: 500;">Não</button>
+          <button type="button" class="btn-primary" id="btnConfirmPinFolder" style="min-width: 84px; justify-content: center; padding: 8px 18px; font-weight: 600;">Sim</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: Editar Pasta -->
+    <div class="modal-backdrop" id="modalEditFolder">
+      <div class="modal-card" style="max-width: 480px;">
+        <div class="modal-header">
+          <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            <span>Editar Pasta</span>
+          </h3>
+          <button class="modal-close-btn">&times;</button>
+        </div>
+        <form id="formEditFolder">
+          <div class="modal-body" style="padding-top: 14px;">
+            <div class="form-group">
+              <label class="form-label">Nome da Pasta</label>
+              <input type="text" id="editFolderName" class="form-input font-mono" placeholder="Nome da pasta" required>
+            </div>
+
+            <label class="form-checkbox-row" style="margin-top: 16px;">
+              <input type="checkbox" id="editFolderAllowComments">
+              <span style="font-size: 13px; font-weight: 500;">Habilitar espaço para comentários</span>
+            </label>
+
+            <label class="form-checkbox-row" style="margin-top: 12px;">
+              <input type="checkbox" id="editFolderHideBrand">
+              <span id="labelEditFolderHideBrand" style="font-size: 13px; font-weight: 500;">Ocultar o nome para o cliente</span>
+            </label>
+
+            <label class="form-checkbox-row" style="margin-top: 12px;">
+              <input type="checkbox" id="editFolderAllowShare" checked>
+              <span style="font-size: 13px; font-weight: 500;">Permitir que cliente compartilhe o link</span>
+            </label>
+          </div>
+          <div class="modal-footer" style="justify-content: flex-end; gap: 8px;">
+            <button type="button" class="btn-secondary btn-modal-cancel">Cancelar</button>
+            <button type="submit" class="btn-primary" id="btnSaveEditFolder">Salvar Alterações</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MODAL: Configurações Gerais -->
+    <div class="modal-backdrop" id="modalSettings">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title">Configurações do Sistema</h3>
+          <button type="button" class="modal-close-btn">&times;</button>
+        </div>
+        <form id="formSettings" novalidate>
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label">Nome do Autor / Estúdio</label>
+              <input type="text" id="settingAuthorName" class="form-input" placeholder="Nome do Autor / Estúdio" required>
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <label class="form-label" style="margin-bottom: 0;">Cor Padrão</label>
+                <span id="settingDefaultColorName" style="font-size: 12px; font-weight: 700; color: var(--brand-orange);">Laranja</span>
+              </div>
+              <div class="settings-theme-color-grid" id="settingsThemeColorGrid"></div>
+              <input type="hidden" id="settingDefaultColor" value="#FF5400">
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+              <label class="form-label" style="margin-bottom: 8px;">Visualização Padrão</label>
+              <div style="display: flex; gap: 18px; align-items: center; margin-top: 6px;">
+                <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">
+                  <input type="radio" name="settingDefaultViewMode" value="grid" id="settingDefaultViewModeGrid" checked>
+                  <span>Galeria/Grade</span>
+                </label>
+                <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">
+                  <input type="radio" name="settingDefaultViewMode" value="columns" id="settingDefaultViewModeColumns">
+                  <span>Colunas</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+              <label class="form-label" style="margin-bottom: 8px;">Capas dos Vídeos</label>
+              <div style="display: flex; gap: 18px; align-items: center; margin-top: 6px;">
+                <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">
+                  <input type="radio" name="settingVideoCoverMode" value="first_frame" id="settingVideoCoverModeFirst">
+                  <span>Primeiro Frame</span>
+                </label>
+                <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">
+                  <input type="radio" name="settingVideoCoverMode" value="auto" id="settingVideoCoverModeAuto" checked>
+                  <span>Automático</span>
+                </label>
+              </div>
+            </div>
+            <label class="form-checkbox-row" style="margin-top: 16px; cursor: pointer;">
+              <input type="checkbox" id="settingShowFileExtensions">
+              <span style="font-size: 13px; font-weight: 500;">Exibir extensão dos arquivos no título</span>
+            </label>
+            <div class="form-checkbox-row settings-auto-delete-row" style="margin-top: 14px;">
+              <label class="settings-auto-delete-label" for="settingAutoDeleteResolved">
+                <input type="checkbox" id="settingAutoDeleteResolved">
+                <span style="font-size: 13px; font-weight: 500;">Autoexcluir notificações concluídas em</span>
+              </label>
+              <input type="number" id="settingAutoDeleteResolvedDays" class="form-input settings-days-counter" min="1" max="365" step="1" value="7">
+              <span class="settings-days-suffix" style="font-size: 13px; font-weight: 500;">dias</span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn-secondary btn-modal-cancel">Cancelar</button>
+            <button type="submit" class="btn-primary" id="btnSaveSettings">Salvar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MODAL: Confirmação de Exclusão de Diretório do Cloud -->
+    <div class="modal-backdrop" id="modalConfirmDeleteProject">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title" style="color: #ef4444; display: flex; align-items: center; gap: 8px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            Excluir Diretório do Cloud
+          </h3>
+          <button class="modal-close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 14px; margin-bottom: 12px; color: var(--text-primary); line-height: 1.5;">
+            Tem certeza de que deseja remover o diretório <strong id="confirmDeleteProjectName" style="color: var(--text-primary); font-weight: 700;"></strong> do Cloud?
+          </p>
+          <div style="background: rgba(255, 84, 0, 0.08); border: 1px solid rgba(255, 84, 0, 0.3); border-radius: var(--radius-md); padding: 14px; margin-top: 14px; display: flex; gap: 12px; align-items: flex-start;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="#FF5400" style="flex-shrink: 0; margin-top: 1px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+            <div style="font-size: 12px; line-height: 1.5; color: var(--text-secondary);">
+              <strong style="color: var(--brand-orange); display: block; margin-bottom: 2px;">O Google Drive continuará 100% intacto</strong>
+              A pasta original e seus vídeos/fotos continuam salvos normalmente no seu Google Drive. A exclusão remove apenas o catálogo do Cloud, link e comentários deste sistema.
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary btn-modal-cancel">Cancelar</button>
+          <button type="button" class="btn-danger" id="btnConfirmDeleteProjectSubmit">Excluir do Cloud</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Baixar em Lote -->
+    <div class="modal-backdrop" id="modalBatchDownload">
+      <div class="modal-card" style="max-width: 520px;">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 36px; height: 36px; border-radius: 9px; background: var(--brand-orange-subtle); color: var(--brand-orange); display: flex; align-items: center; justify-content: center;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            </div>
+            <div>
+              <h3 class="modal-title" style="margin: 0; font-size: 17px;">Baixar em Lote</h3>
+              <p style="margin: 2px 0 0 0; font-size: 12px; color: var(--text-secondary);" id="batchModalSubtitle">Selecione o formato para download</p>
+            </div>
+          </div>
+          <button class="modal-close-btn">&times;</button>
+        </div>
+
+        <div class="modal-body" style="padding: 20px 24px;">
+          <div class="batch-selection-info" id="batchSelectionInfo">
+            <!-- Preenchido dinamicamente -->
+          </div>
+
+          <div class="batch-download-options">
+            <!-- Opção 1: .ZIP -->
+            <div class="batch-option-card" id="btnOptionDownloadZip">
+              <div class="batch-option-icon zip-icon">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                </svg>
+              </div>
+              <div class="batch-option-info">
+                <div class="batch-option-title-row">
+                  <h4 class="batch-option-title">Arquivo .ZIP Compactado</h4>
+                </div>
+                <p class="batch-option-desc">Empacota os arquivos em um único .zip para salvar no seu computador.</p>
+              </div>
+              <div class="batch-option-arrow">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+              </div>
+            </div>
+
+            <!-- Opção 2: Arquivos Soltos -->
+            <div class="batch-option-card" id="btnOptionDownloadLoose">
+              <div class="batch-option-icon loose-icon">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z"/>
+                </svg>
+              </div>
+              <div class="batch-option-info">
+                <div class="batch-option-title-row">
+                  <h4 class="batch-option-title">Arquivos Soltos</h4>
+                </div>
+                <p class="batch-option-desc"><strong>iPhone e Android:</strong> Baixa direto no Fotos/Galeria.<br><strong>PC/Mac:</strong> Baixa cada arquivo individualmente.</p>
+              </div>
+              <div class="batch-option-arrow">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Progress / Status Area -->
+          <div class="batch-download-progress" id="batchDownloadProgress" style="display: none; margin-top: 16px;">
+            <div class="progress-bar-container">
+              <div class="progress-bar-fill" id="batchProgressFill" style="width: 0%;"></div>
+            </div>
+            <p class="progress-status-text" id="batchProgressStatus">Iniciando...</p>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary btn-modal-cancel">Fechar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Add Division -->
+    <div class="modal-backdrop" id="modalAddDivision">
+      <div class="modal-card" style="max-width: 480px;">
+        <div class="modal-header">
+          <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16.5L6.5 9.5h11L12 16.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+            Nova Divisão
+          </h3>
+          <button class="modal-close-btn" type="button" aria-label="Fechar">&times;</button>
+        </div>
+        <form id="formAddDivision">
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label" for="newDivisionName">Nome da Divisão</label>
+              <input type="text" class="form-input" id="newDivisionName" placeholder="Ex: 2026, Campanhas, Clientes VIP..." required autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="newDivisionCategory">Categoria</label>
+              <select class="form-input" id="newDivisionCategory" required>
+              </select>
+            </div>
+            <div class="form-group" id="groupDivisionParent">
+              <label class="form-label" for="newDivisionParent">Divisão Pai (Opcional)</label>
+              <select class="form-input" id="newDivisionParent">
+                <option value="">Nenhuma (Raiz da Categoria)</option>
+              </select>
+              <span class="form-hint" style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px; display: block;">Selecione para criar uma subdivisão dentro de outra divisão</span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn-secondary btn-modal-cancel">Cancelar</button>
+            <button type="submit" class="btn-primary" id="btnSubmitAddDivision">Criar Divisão</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal Edit/Rename Division -->
+    <div class="modal-backdrop" id="modalEditDivision">
+      <div class="modal-card" style="max-width: 480px;">
+        <div class="modal-header">
+          <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            Editar Divisão
+          </h3>
+          <button class="modal-close-btn" type="button" aria-label="Fechar">&times;</button>
+        </div>
+        <form id="formEditDivision">
+          <input type="hidden" id="editDivisionId" />
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label" for="editDivisionName">Nome da Divisão</label>
+              <input type="text" class="form-input" id="editDivisionName" required autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="editDivisionCategory">Categoria</label>
+              <select class="form-input" id="editDivisionCategory" required>
+              </select>
+            </div>
+            <div class="form-group" id="groupEditDivisionParent">
+              <label class="form-label" for="editDivisionParent">Divisão Pai (Opcional)</label>
+              <select class="form-input" id="editDivisionParent">
+                <option value="">Nenhuma (Raiz da Categoria)</option>
+              </select>
+              <span class="form-hint" style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px; display: block;">Selecione para aninhar dentro de outra divisão</span>
+            </div>
+          </div>
+          <div class="modal-footer" style="justify-content: space-between;">
+            <button type="button" class="btn-danger-outline" id="btnDeleteDivision">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+              <span>Excluir Divisão</span>
+            </button>
+            <div style="display: flex; gap: 8px;">
+              <button type="button" class="btn-secondary btn-modal-cancel">Cancelar</button>
+              <button type="submit" class="btn-primary">Salvar Alterações</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Context Menu para Divisão na Sidebar -->
+    <div class="category-context-menu division-context-menu" id="divisionContextMenu" style="display: none;" role="menu" aria-label="Menu da Divisão">
+      <div class="context-menu-header">
+        <span class="context-menu-label">OPÇÕES DA DIVISÃO</span>
+        <span class="context-menu-cat-name" id="ctxDivisionHeaderName">Divisão</span>
+      </div>
+      <div class="division-ctx-actions">
+        <button type="button" class="division-ctx-item" id="ctxDivisionAddSub">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+          <span>+ Nova Subdivisão</span>
+        </button>
+        <button type="button" class="division-ctx-item" id="ctxDivisionRename">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+          <span>Renomear / Editar</span>
+        </button>
+        <div class="context-divider"></div>
+        <button type="button" class="division-ctx-item item-delete" id="ctxDivisionDelete">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+          <span>Excluir Divisão</span>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Mobile Portrait Guard (Active only on smartphones in landscape when no video is playing) -->
+  <aside id="mobilePortraitGuard" class="mobile-portrait-guard" aria-label="Aviso de orientação vertical" style="display: none;">
+    <div class="guard-card">
+      <div class="brand-badge" style="margin-bottom: 4px;">
+        <svg class="brand-badge-logo" viewBox="0 0 1585.74 1030.98" width="22" height="15" fill="currentColor" aria-hidden="true"><path fill="currentColor" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/><path fill="currentColor" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/><g><path fill="currentColor" d="M331.2,1024.8c-26.64-5.22-52.18-13.64-76.22-24.84C106.1,944.84,0,801.6,0,633.58c0-195.39,143.43-357.25,330.76-386.04-22.01,27.86-34.3,62.6-34.3,99.73v577.31c0,29.93,8.07,58.96,23.33,83.94,3.46,5.66,7.27,11.1,11.41,16.28Z"/><path fill="currentColor" d="M1585.74,693.33c0,122.09-69.26,228.03-170.62,280.62-53.46,36.06-117.43,57.03-186.14,57.03h-636.4l444.28-272.6c49.44-30.34,78.18-83.07,76.87-141.06-1.31-58-32.4-109.38-83.16-137.46l-494.84-273.69c-12.02-6.65-24.56-11.66-37.37-15.05C589.85,74.73,731.91,0,891.42,0c240.88,0,441.95,170.45,489.19,397.33,119.84,44.92,205.13,160.48,205.13,296Z"/></g><g><path fill="currentColor" d="M955.63,698.49l-434.14,266.38c-.14.09-.28.17-.42.25-27.71,16.8-61.1,17.39-89.41,1.54-28.45-15.92-45.44-44.9-45.44-77.5v-506.49c0-31.77,16.34-60.37,43.7-76.51,10.63-6.26,22.1-10.17,33.79-11.69,4.21.59,8.39,1.25,12.55,1.98.52-.89,1.04-1.79,1.57-2.68,13.79.45,27.53,4.17,40.2,11.18l13.91,7.69,420.23,232.42c27.96,15.46,45.09,43.77,45.81,75.71.72,31.94-15.11,60.99-42.34,77.71Z"/><path fill="currentColor" d="M477.83,293.78c-.53.89-1.05,1.78-1.57,2.68-4.16-.74-8.33-1.4-12.55-1.98,3.75-.49,7.53-.74,11.3-.74.94,0,1.88.02,2.82.04Z"/></g></svg>
+        <span class="brand-author-name">Giffú</span>
+        <span class="app-subtitle">Cloud</span>
+      </div>
+      <svg class="guard-phone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="5" y="2" width="14" height="20" rx="3" ry="3"></rect>
+        <line x1="12" y1="18" x2="12.01" y2="18"></line>
+      </svg>
+      <h3 class="guard-title">Gire o smartphone para a vertical</h3>
+      <p class="guard-text">A navegação foi desenvolvida para visualização em pé. Para ver vídeos em tela cheia, reproduza o vídeo e gire o aparelho.</p>
+      <button id="btnGuardWatchFullscreen" class="btn-guard-watch" style="display: none;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <span>Assistir em tela cheia</span>
+      </button>
+    </div>
+  </aside>
+  <!-- Context Menu for Category Colors (Right-Click) -->
+  <div class="category-context-menu" id="categoryContextMenu" style="display: none;" role="menu" aria-label="Menu de Cor da Categoria">
+    <div class="context-menu-header">
+      <div class="context-menu-title-row">
+        <span class="context-menu-label">COR DA CATEGORIA</span>
+        <span class="context-menu-cat-name" id="ctxCategoryName">Categoria</span>
+      </div>
+    </div>
+
+    <!-- Default Orange (Identity) at top -->
+    <button type="button" class="context-default-btn" id="ctxBtnDefaultColor" data-color="#FF5400" title="Restaurar cor padrão da identidade">
+      <span class="context-swatch-lg" style="background-color: #FF5400;"></span>
+      <div class="context-default-info">
+        <span class="context-default-title">Padrão</span>
+        <span class="context-default-sub">Identidade Visual</span>
+      </div>
+      <span class="context-check-mark">✓</span>
+    </button>
+
+    <div class="context-divider"></div>
+    <div class="context-palette-header">
+      <span>CORES VIBRANTES</span>
+      <span class="context-color-hover-name" id="ctxHoverColorName">Paleta</span>
+    </div>
+
+    <!-- 14 vibrant swatches in 7x2 grid -->
+    <div class="context-palette-grid" id="ctxPaletteGrid">
+      <button type="button" class="context-swatch-btn" data-color="#EAB308" data-name="Amarelo" title="Amarelo" style="background-color: #EAB308;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#2563EB" data-name="Azul" title="Azul" style="background-color: #2563EB;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#16A34A" data-name="Verde" title="Verde" style="background-color: #16A34A;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#EC4899" data-name="Rosa" title="Rosa" style="background-color: #EC4899;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#9333EA" data-name="Roxo" title="Roxo" style="background-color: #9333EA;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#EF4444" data-name="Vermelho" title="Vermelho" style="background-color: #EF4444;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#8D5B4C" data-name="Marrom" title="Marrom" style="background-color: #8D5B4C;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#475569" data-name="Cinza Escuro" title="Cinza Escuro" style="background-color: #475569;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#94A3B8" data-name="Cinza Claro" title="Cinza Claro" style="background-color: #94A3B8;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#7C3AED" data-name="Violeta" title="Violeta" style="background-color: #7C3AED;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#06B6D4" data-name="Ciano" title="Ciano" style="background-color: #06B6D4;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#0284C7" data-name="Cerúleo" title="Cerúleo" style="background-color: #0284C7;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#D97706" data-name="Dourado" title="Dourado" style="background-color: #D97706;"></button>
+      <button type="button" class="context-swatch-btn" data-color="#FB923C" data-name="Laranja Clarinho" title="Laranja Clarinho" style="background-color: #FB923C;"></button>
+    </div>
+  </div>
+
+  <!-- Universal Context Menu (Desktop Right-Click & Mobile Long-Press) -->
+  <div class="app-universal-context-menu" id="appUniversalContextMenu" style="display: none;" role="menu" aria-label="Menu de Opções">
+    <!-- Header: Icon + Badge + Name -->
+    <div class="ctx-header">
+      <div class="ctx-header-icon-wrap" id="ctxHeaderIconWrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+      </div>
+      <div class="ctx-header-info">
+        <span class="ctx-badge-type" id="ctxBadgeType">DIRETÓRIO</span>
+        <span class="ctx-item-title" id="ctxItemTitle">Nome do Item</span>
+      </div>
+    </div>
+
+    <div class="ctx-divider"></div>
+
+    <div class="ctx-actions">
+      <!-- 1. COR DO ÍCONE (Submenu / Accordion) -->
+      <div class="ctx-color-group" id="ctxColorGroup">
+        <button type="button" class="ctx-item ctx-item-color" id="ctxBtnColorToggle" role="menuitem" aria-expanded="false">
+          <div class="ctx-item-left">
+            <span class="ctx-color-preview-dot" id="ctxColorPreviewDot" style="background-color: #FF5400;"></span>
+            <span>Cor</span>
+          </div>
+          <svg class="ctx-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+
+        <!-- Palette submenu / accordion -->
+        <div class="ctx-palette-wrapper" id="ctxPaletteWrapper" style="display: none;">
+          <button type="button" class="ctx-swatch-default-btn" id="ctxSwatchDefaultBtn" data-color="#FF5400" title="Restaurar Padrão">
+            <span class="ctx-swatch-circle" style="background-color: #FF5400;"></span>
+            <div class="ctx-default-text">
+              <span class="ctx-default-name">Padrão</span>
+              <span class="ctx-default-sub">Identidade Visual</span>
+            </div>
+            <span class="ctx-swatch-check" id="ctxDefaultCheck">✓</span>
+          </button>
+
+          <div class="ctx-swatches-grid" id="ctxSwatchesGrid">
+            <button type="button" class="ctx-swatch-btn" data-color="#EAB308" data-name="Amarelo" title="Amarelo" style="background-color: #EAB308;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#2563EB" data-name="Azul" title="Azul" style="background-color: #2563EB;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#16A34A" data-name="Verde" title="Verde" style="background-color: #16A34A;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#EC4899" data-name="Rosa" title="Rosa" style="background-color: #EC4899;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#9333EA" data-name="Roxo" title="Roxo" style="background-color: #9333EA;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#EF4444" data-name="Vermelho" title="Vermelho" style="background-color: #EF4444;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#8D5B4C" data-name="Marrom" title="Marrom" style="background-color: #8D5B4C;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#475569" data-name="Cinza Escuro" title="Cinza Escuro" style="background-color: #475569;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#94A3B8" data-name="Cinza Claro" title="Cinza Claro" style="background-color: #94A3B8;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#7C3AED" data-name="Violeta" title="Violeta" style="background-color: #7C3AED;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#06B6D4" data-name="Ciano" title="Ciano" style="background-color: #06B6D4;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#0284C7" data-name="Cerúleo" title="Cerúleo" style="background-color: #0284C7;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#D97706" data-name="Dourado" title="Dourado" style="background-color: #D97706;"></button>
+            <button type="button" class="ctx-swatch-btn" data-color="#FB923C" data-name="Laranja Clarinho" title="Laranja Clarinho" style="background-color: #FB923C;"></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. EDITAR -->
+      <button type="button" class="ctx-item" id="ctxBtnEdit" role="menuitem">
+        <div class="ctx-item-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+          <span>Editar</span>
+        </div>
+      </button>
+
+      <!-- 3. RENOMEAR -->
+      <button type="button" class="ctx-item" id="ctxBtnRename" role="menuitem">
+        <div class="ctx-item-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="4" y1="9" x2="20" y2="9"></line>
+            <line x1="4" y1="15" x2="20" y2="15"></line>
+            <line x1="10" y1="3" x2="8" y2="21"></line>
+            <line x1="16" y1="3" x2="14" y2="21"></line>
+          </svg>
+          <span>Renomear</span>
+        </div>
+      </button>
+
+      <!-- 4. ARQUIVAR (Apenas Diretórios) -->
+      <button type="button" class="ctx-item" id="ctxBtnArchive" role="menuitem" style="display: none;">
+        <div class="ctx-item-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="21 8 21 21 3 21 3 8"></polyline>
+            <rect x="1" y="3" width="22" height="5"></rect>
+            <line x1="10" y1="12" x2="14" y2="12"></line>
+          </svg>
+          <span id="ctxBtnArchiveText">Arquivar</span>
+        </div>
+      </button>
+
+      <!-- 5. REMOVER DO CLOUD (Apenas Diretórios) -->
+      <button type="button" class="ctx-item ctx-item-cloud-remove" id="ctxBtnRemoveCloud" role="menuitem" style="display: none;">
+        <div class="ctx-item-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+            <line x1="8" y1="13" x2="14" y2="13"></line>
+          </svg>
+          <span>Remover do Cloud</span>
+        </div>
+      </button>
+
+      <div class="ctx-divider"></div>
+
+      <!-- 5. EXCLUIR DO DRIVE (Exclusão com 2 confirmações) -->
+      <button type="button" class="ctx-item ctx-item-danger" id="ctxBtnDeleteDrive" role="menuitem">
+        <div class="ctx-item-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
+          </svg>
+          <span id="ctxBtnDeleteText">Excluir do Drive</span>
+        </div>
+      </button>
+    </div>
+  </div>
+
+  <!-- MODAL: Renomear Item (Afeta Google Drive) -->
+  <div class="modal-backdrop" id="modalUniversalRename" style="z-index: 10005;">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+          <span id="renameModalTitle">Renomear</span>
+        </h3>
+        <button class="modal-close-btn" type="button" id="btnUniversalRenameClose" aria-label="Fechar">&times;</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
+        <!-- Clear Warning Box -->
+        <div class="rename-warning-drive" id="renameDriveWarningBox">
+          <div class="rename-warning-icon">⚠️</div>
+          <div class="rename-warning-content">
+            <strong>Atenção:</strong> Alterar o nome afetará diretamente o arquivo/pasta original no seu <strong>Google Drive</strong>.
+          </div>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" for="inputUniversalRename" id="labelUniversalRename">Novo Nome</label>
+          <input type="text" class="form-input" id="inputUniversalRename" placeholder="Digite o novo nome..." autocomplete="off" />
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="button" class="btn-secondary" id="btnUniversalRenameCancel">Cancelar</button>
+        <button type="button" class="btn-primary" id="btnUniversalRenameSave">Salvar Nome</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Remover do Cloud (Mantém no Google Drive) -->
+  <div class="modal-backdrop" id="modalRemoveCloud" style="z-index: 10005;">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>
+          Remover do Cloud
+        </h3>
+        <button class="modal-close-btn" type="button" id="btnRemoveCloudClose" aria-label="Fechar">&times;</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="cloud-keep-notice">
+          <div class="cloud-keep-icon">☁️</div>
+          <div class="cloud-keep-content">
+            <strong style="color: var(--primary);">MANTÉM NO GOOGLE DRIVE</strong>
+            <p style="margin: 4px 0 0 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5;">
+              O diretório <strong id="removeCloudProjName" style="color: var(--text-primary);"></strong> será removido do programa de entrega, mas <strong>todos os arquivos e pastas permanecerão 100% intactos e salvos no seu Google Drive</strong>.
+            </p>
+          </div>
+        </div>
+        <p style="font-size: 13.5px; color: var(--text-primary); margin: 0; line-height: 1.5;">
+          Deseja realmente remover este diretório do programa?
+        </p>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="button" class="btn-secondary" id="btnRemoveCloudCancel">Cancelar</button>
+        <button type="button" class="btn-primary" id="btnRemoveCloudConfirm">Remover do Cloud</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Excluir do Drive (2 Confirmações Obrigatórias) -->
+  <div class="modal-backdrop" id="modalDeleteDrive" style="z-index: 10005;">
+    <div class="modal-card" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px; color: #EF4444;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          <span id="deleteDriveModalTitle">Excluir do Google Drive</span>
+        </h3>
+        <button class="modal-close-btn" type="button" id="btnDeleteDriveClose" aria-label="Fechar">&times;</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
+        <!-- ETAPA 1 -->
+        <div id="deleteDriveStep1" style="display: flex; flex-direction: column; gap: 14px;">
+          <div class="danger-warning-drive">
+            <div class="danger-warning-icon">⚠️</div>
+            <div class="danger-warning-content">
+              <strong>AVISO CLARO: Afeta o original no Google Drive!</strong>
+              <p style="margin: 6px 0 0 0; font-size: 13px; line-height: 1.5;">
+                Você está prestes a excluir <strong id="deleteDriveItemName" style="color: var(--text-primary);"></strong>.
+                Esta ação removerá o item do programa e <strong>apagará o arquivo/pasta original diretamente na sua conta do Google Drive</strong>.
+              </p>
+            </div>
+          </div>
+          <div style="font-size: 12.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+            <span>Etapa 1 de 2: Confirmação de segurança</span>
+          </div>
+        </div>
+
+        <!-- ETAPA 2 (Segunda Confirmação) -->
+        <div id="deleteDriveStep2" style="display: none; flex-direction: column; gap: 14px;">
+          <div class="danger-final-box">
+            <div class="danger-final-icon">🚨</div>
+            <div class="danger-final-content">
+              <strong style="color: #EF4444; font-size: 14.5px;">SEGUNDA CONFIRMAÇÃO: Certeza absoluta?</strong>
+              <p style="margin: 6px 0 0 0; font-size: 13px; line-height: 1.5; color: var(--text-secondary);">
+                Esta operação é <strong>definitiva e irreversível</strong>. O arquivo ou pasta será excluído permanentemente da sua nuvem Google Drive.
+              </p>
+            </div>
+          </div>
+          <div style="font-size: 12.5px; color: #EF4444; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+            <span>Etapa 2 de 2: Autorização definitiva</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button type="button" class="btn-secondary" id="btnDeleteDriveCancel">Cancelar</button>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn-danger" id="btnDeleteDriveStep1Next">Prosseguir para Exclusão &rarr;</button>
+          <button type="button" class="btn-danger" id="btnDeleteDriveConfirm" style="display: none; background: #DC2626; border-color: #DC2626;">Sim, Excluir Definitivamente do Drive</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom-Right Comments Toast Notifications Container -->
+  <div id="commentsToastContainer" class="comments-toast-container" aria-live="polite"></div>
+
+  <!-- MODAL: Gerenciar Contas de Armazenamento -->
+  <div class="modal-backdrop" id="modalManageAccounts">
+    <div class="modal-card" style="max-width: 560px;">
+      <div class="modal-header">
+        <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+          Contas de Armazenamento
+        </h3>
+        <button class="modal-close-btn" type="button" aria-label="Fechar">&times;</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 20px;">
+        <!-- Primary Google Account (Already Connected) -->
+        <div>
+          <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-tertiary); margin-bottom: 8px;">Conta Principal</div>
+          <div class="primary-account-row" id="primaryGoogleAccountCard">
+            <div class="account-card-left">
+              <div class="account-provider-icon" style="background: rgba(66, 133, 244, 0.12); color: #4285F4;">
+                <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+              </div>
+              <div class="account-card-info">
+                <div class="account-card-name" id="primaryAccountEmail">Google Drive</div>
+                <div class="account-card-meta">Login do Sistema • Espelhamento Ativo</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Other Connected Accounts List -->
+        <div>
+          <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-tertiary); margin-bottom: 8px;">Outras Contas Conectadas</div>
+          <div id="connectedAccountsList" class="connected-accounts-list">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <!-- Connect New Service Selection -->
+        <div>
+          <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-tertiary); margin-bottom: 8px;">Adicionar Novo Serviço ou Conta</div>
+          <div class="cloud-provider-grid">
+            <!-- Dropbox -->
+            <div class="cloud-provider-card" data-provider="dropbox">
+              <div class="cloud-provider-icon" style="background: rgba(0, 97, 255, 0.1); color: #0061FF;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="#0061FF"><path d="M6 2l6 4-6 4-6-4 6-4zm12 0l6 4-6 4-6-4 6-4zM0 14l6-4 6 4-6 4-6-4zm24 0l-6-4-6 4 6 4 6-4zM6 19.5l6-4 6 4-6 4-6-4z"/></svg>
+              </div>
+              <div class="cloud-provider-title">Dropbox</div>
+            </div>
+
+            <!-- OneDrive -->
+            <div class="cloud-provider-card" data-provider="onedrive">
+              <div class="cloud-provider-icon" style="background: rgba(0, 120, 212, 0.1); color: #0078D4;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="#0078D4"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
+              </div>
+              <div class="cloud-provider-title">OneDrive</div>
+            </div>
+
+            <!-- Box -->
+            <div class="cloud-provider-card" data-provider="box">
+              <div class="cloud-provider-icon" style="background: rgba(0, 97, 213, 0.1); color: #0061D5;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="#0061D5"><path d="M12.003 2.164L2.4 8.067v7.866l9.603 5.903 9.597-5.903V8.067l-9.597-5.903zm-1.2 13.916l-6.4-3.937 6.4-3.938v7.875zm2.4 0V8.205l6.4 3.938-6.4 3.937z"/></svg>
+              </div>
+              <div class="cloud-provider-title">Box</div>
+            </div>
+
+            <!-- iCloud -->
+            <div class="cloud-provider-card" data-provider="icloud">
+              <div class="cloud-provider-icon" style="background: rgba(0, 112, 201, 0.1); color: #0070c9;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="#0070c9"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95A5.5 5.5 0 0 1 12 6c2.53 0 4.71 1.7 5.32 4.19l.34 1.39 1.41.25C20.44 12.07 21 13.2 21 14.5c0 1.93-1.57 3.5-3.5 3.5z"/></svg>
+              </div>
+              <div class="cloud-provider-title">iCloud Drive</div>
+            </div>
+
+            <!-- Outra Conta Google -->
+            <div class="cloud-provider-card" data-provider="google">
+              <div class="cloud-provider-icon" style="background: rgba(234, 67, 53, 0.1); color: #EA4335;">
+                <svg width="22" height="22" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+              </div>
+              <div class="cloud-provider-title">Outra Conta Google</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary btn-modal-cancel">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Conectar Conta de Serviço Específico -->
+  <div class="modal-backdrop" id="modalConnectAccount">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="connectModalTitle">Conectar Conta</h3>
+        <button class="modal-close-btn" type="button" aria-label="Fechar">&times;</button>
+      </div>
+      <form id="formConnectAccount">
+        <input type="hidden" id="connectProvider" />
+        <div class="modal-body">
+          <div id="connectProviderHero" class="connect-provider-hero">
+            <!-- Rendered dynamically with provider logo and instructions -->
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Nome / Rótulo da Conta</label>
+            <input type="text" id="connectAccountName" class="form-input" placeholder="Ex: Meu Dropbox Pessoal" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">E-mail da Conta (Opcional)</label>
+            <input type="email" id="connectAccountEmail" class="form-input" placeholder="seu-email@dominio.com">
+          </div>
+
+          <div class="form-group" id="connectCredentialGroup">
+            <label class="form-label" id="connectCredentialLabel">Token de Acesso ou Chave de API</label>
+            <input type="text" id="connectCredentialValue" class="form-input font-mono" placeholder="Cole o token ou credencial aqui...">
+            <small class="form-hint" id="connectCredentialHint"></small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary" id="btnCancelConnectAccount">Voltar</button>
+          <button type="submit" class="btn-primary" id="btnSubmitConnectAccount">Salvar e Conectar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/js/api.js"></script>
+  <script src="/js/auth.js"></script>
+  <script src="/js/player.js"></script>
+  <script src="/js/audioPlayer.js"></script>
+  <script src="/js/annotationStudio.js"></script>
+  <script src="/js/comments.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

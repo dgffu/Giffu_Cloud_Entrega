@@ -27,21 +27,43 @@ const Auth = {
   },
 
   // mode: 'author' (painel + conexão com o Drive) | 'client' (somente comentários)
-  // IMPORTANTE: window.open precisa rodar direto no clique, antes de qualquer await
   signIn(mode = 'client', { switchAccount = false } = {}) {
     if (!this.config.configured) {
       return Promise.reject(new Error('Login com Google ainda não configurado (faltam Client ID e Client Secret). Veja o README.'));
+    }
+
+    const url = `/api/auth/google/start?mode=${encodeURIComponent(mode)}${switchAccount ? '&switch=1' : ''}`;
+
+    // No celular/tablet, navegadores (iOS Safari e Android Chrome) bloqueiam popups agressivamente
+    // e o window.opener entre abas é desconectado. Usamos navegação direta de página!
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      || (window.matchMedia && window.matchMedia('(max-width: 768px)').matches)
+      || ('ontouchstart' in window && window.innerWidth <= 1024);
+
+    if (isMobile) {
+      try {
+        sessionStorage.setItem('giffu_auth_return', window.location.pathname + window.location.search);
+      } catch (_) {}
+      window.location.href = url;
+      return new Promise(() => {}); // O navegador redirecionará diretamente
     }
 
     const width = 520;
     const height = 680;
     const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
     const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
-    const url = `/api/auth/google/start?mode=${encodeURIComponent(mode)}${switchAccount ? '&switch=1' : ''}`;
-    const popup = window.open(url, 'giffu-google-login', `width=${width},height=${height},left=${left},top=${top}`);
+    let popup = null;
+    try {
+      popup = window.open(url, 'giffu-google-login', `width=${width},height=${height},left=${left},top=${top}`);
+    } catch (_) {}
 
-    if (!popup) {
-      return Promise.reject(new Error('O navegador bloqueou a janela de login. Libere pop-ups para este site e tente de novo.'));
+    // Fallback caso o popup seja bloqueado no desktop
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+      try {
+        sessionStorage.setItem('giffu_auth_return', window.location.pathname + window.location.search);
+      } catch (_) {}
+      window.location.href = url;
+      return new Promise(() => {});
     }
 
     return new Promise((resolve, reject) => {

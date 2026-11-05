@@ -1,7 +1,7 @@
 {
   "name": "Giffú Cloud",
   "short_name": "Giffú",
-  "description": "Plataforma minimalista e elegante para entrega de vídeos e projetos audiovisuais de alta qualidade.",
+  "description": "Streaming de alta qualidade de conteúdo direto da nuvem.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0d0f12",

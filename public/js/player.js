@@ -98,7 +98,7 @@ class CustomVideoPlayer {
 
     this.container.innerHTML = `
       <!-- Video Element -->
-      <video class="custom-video-element" playsinline preload="metadata" src="${streamUrl}"></video>
+      <video class="custom-video-element" playsinline webkit-playsinline x5-playsinline preload="metadata" src="${streamUrl}"></video>
 
       <!-- Transcode / Preparing State Overlay -->
       <div class="alpha-transcode-overlay" id="alphaTranscodeOverlay" style="display: none;">
@@ -467,22 +467,12 @@ class CustomVideoPlayer {
       this.applyOrientationLock(effectiveDir);
       this.updateFullscreenOrientation();
       this.updateFullscreenIcon(true);
+      try {
+        window.scrollTo(0, 1);
+      } catch (e) {}
     };
 
-    // No iPhone Safari, element.requestFullscreen não existe no WebKit;
-    // a única API existente no iOS para ocultar as barras de navegação (endereço e rodapé) é video.webkitEnterFullscreen
-    const isIPhone = /iPhone|iPod/i.test(navigator.userAgent);
-    if (isIPhone && this.video && this.video.webkitEnterFullscreen && !this.container.requestFullscreen) {
-      try {
-        this.video.webkitEnterFullscreen();
-        onEnterSuccess();
-        return;
-      } catch (e) {
-        console.warn('webkitEnterFullscreen error:', e);
-      }
-    }
-
-    // Android / iPad / Desktop: utiliza Fullscreen API com { navigationUI: 'hide' } para ocultar as barras de navegação do browser
+    // Solicita Fullscreen API exclusivamente no CONTAINER do app (para manter sempre o player do app e nunca o player nativo do dispositivo)
     const fsOptions = { navigationUI: 'hide' };
     const req = this.container.requestFullscreen ||
                 this.container.webkitRequestFullscreen ||
@@ -503,23 +493,14 @@ class CustomVideoPlayer {
         p.then(() => {
           onEnterSuccess();
         }).catch(() => {
-          // Fallback caso container requestFullscreen seja rejeitado: tentar no elemento de vídeo
-          if (this.video && this.video.requestFullscreen) {
-            try { this.video.requestFullscreen(fsOptions); } catch (e) {}
-          } else if (this.video && this.video.webkitEnterFullscreen) {
-            try { this.video.webkitEnterFullscreen(); } catch (e) {}
-          }
           onEnterSuccess();
         });
       } else {
         onEnterSuccess();
       }
-    } else if (this.video && this.video.webkitEnterFullscreen) {
-      try {
-        this.video.webkitEnterFullscreen();
-      } catch (e) {}
-      onEnterSuccess();
     } else {
+      // Ambientes móveis sem suporte a requestFullscreen no elemento container (ex: iPhone Safari):
+      // Ativa a tela cheia pelo player customizado do app (CSS edge-to-edge), mantendo a interface e controles do app
       onEnterSuccess();
     }
   }

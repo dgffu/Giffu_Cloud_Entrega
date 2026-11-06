@@ -11068,9 +11068,9 @@ class EntregaApp {
     }
 
     if (btnAddDivision) {
-      // Ao clicar com o direito em diretórios: + Divisão (abre menu normal de criar divisão)
-      // Ao clicar com o direito em divisões/subdivisões: + Divisão (parar criar uma subdivisão — abre menu normal de criar divisão)
-      const showDiv = isAuthor && (ctxItem.type === 'project' || ctxItem.type === 'division' || ctxItem.type === 'category');
+      // Ao clicar com o direito em divisões/subdivisões: + Divisão (para criar uma subdivisão — abre menu normal de criar divisão)
+      // Em Diretórios (project), não exibe + Divisão
+      const showDiv = isAuthor && (ctxItem.type === 'division' || ctxItem.type === 'category');
       btnAddDivision.style.display = showDiv ? 'flex' : 'none';
     }
 

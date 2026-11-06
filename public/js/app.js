@@ -1691,11 +1691,12 @@ class EntregaApp {
         document.fullscreenElement ||
         document.webkitFullscreenElement ||
         document.body.classList.contains('video-fullscreen-active') ||
+        document.body.classList.contains('photo-fullscreen-active') ||
         (this.playerInstance && this.playerInstance.isFullscreen && this.playerInstance.isFullscreen())
       ) {
         return;
       }
-      if (e && e.target && e.target.closest && e.target.closest('#btnFullscreen, .custom-player-wrapper')) {
+      if (e && e.target && e.target.closest && e.target.closest('#btnFullscreen, #btnFullscreenPhoto, .custom-player-wrapper, .custom-image-wrapper, .comment-lightbox-backdrop')) {
         return;
       }
       if (screen.orientation && screen.orientation.lock) {
@@ -1746,7 +1747,9 @@ class EntregaApp {
         document.webkitFullscreenElement ||
         (this.playerInstance && this.playerInstance.video && this.playerInstance.video.webkitDisplayingFullscreen) ||
         document.body.classList.contains('video-fullscreen-active') ||
-        (this.playerInstance && this.playerInstance.isFullscreen && this.playerInstance.isFullscreen())
+        document.body.classList.contains('photo-fullscreen-active') ||
+        (this.playerInstance && this.playerInstance.isFullscreen && this.playerInstance.isFullscreen()) ||
+        document.querySelector('.custom-image-wrapper.is-fullscreen')
       );
 
       const isVideoPlaying = !!(
@@ -5754,7 +5757,7 @@ class EntregaApp {
 
     const cardImgSrc = (isDesign || isPdf)
       ? (item.thumbnailUrl || (item.driveFileId ? `/api/stream/preview?drive=${item.driveFileId}&size=600` : item.url))
-      : (item.thumbnailUrl || item.url);
+      : (item.thumbnailUrl || (item.driveFileId ? `/api/stream/preview?drive=${item.driveFileId}&size=600` : item.url));
 
     const pillClass = isPdf ? 'doc-pill pdf-pill' : (isPsd ? 'photo-pill psd-pill' : (isAi ? 'photo-pill ai-pill' : 'photo-pill'));
     const formattedSize = this.formatFileSize(item.size);
@@ -5777,7 +5780,7 @@ class EntregaApp {
           ` : ''}
 
           ${(isImage || isPdf) ? `
-            <img class="card-preview-image" src="${cardImgSrc}" alt="${this.getDisplayTitle(item)}" loading="lazy" onload="if (this.naturalWidth && !this.closest('.video-card').querySelector('.card-photo-res')?.textContent?.includes('x')) { const el = this.closest('.video-card').querySelector('.card-photo-res'); if (el && !${isPdf}) el.textContent = this.naturalWidth + 'x' + this.naturalHeight; }" />
+            <img class="card-preview-image" src="${cardImgSrc}" alt="${this.getDisplayTitle(item)}" loading="lazy" decoding="async" onerror="window.handleMediaThumbError && window.handleMediaThumbError(this, '${item.driveFileId || ''}', '${item.url || ''}')" onload="if (this.naturalWidth && !this.closest('.video-card').querySelector('.card-photo-res')?.textContent?.includes('x')) { const el = this.closest('.video-card').querySelector('.card-photo-res'); if (el && !${isPdf}) el.textContent = this.naturalWidth + 'x' + this.naturalHeight; }" />
             
             <span class="card-media-type-pill ${pillClass}" style="${item.color ? `background-color: ${item.color}; color: #fff; border-color: ${item.color};` : ''}">
               ${isPdf ? `
@@ -5851,7 +5854,7 @@ class EntregaApp {
             </div>
           ` : `
             ${(item.customThumbnailUrl || item.thumbnailUrl) ? `
-              <img class="card-preview-image" src="${item.customThumbnailUrl || item.thumbnailUrl}" alt="${this.getDisplayTitle(item)}" loading="lazy" />
+              <img class="card-preview-image" src="${item.customThumbnailUrl || item.thumbnailUrl}" alt="${this.getDisplayTitle(item)}" loading="lazy" decoding="async" onerror="window.handleMediaThumbError && window.handleMediaThumbError(this, '${item.driveFileId || ''}', '')" />
             ` : `
               <video 
                 class="card-video video-preview-element" 
@@ -6895,7 +6898,7 @@ class EntregaApp {
         <div class="macos-preview-column" id="macosPreviewColumn">
           <div class="macos-preview-hero">
             ${isImage || isPdf ? `
-              <img class="macos-preview-thumb" src="${previewItem.thumbnailUrl || (previewItem.driveFileId ? `/api/stream/preview?drive=${previewItem.driveFileId}&size=600` : previewItem.url)}" alt="${this.escapeHtml(this.getDisplayTitle(previewItem))}" />
+              <img class="macos-preview-thumb" src="${previewItem.thumbnailUrl || (previewItem.driveFileId ? `/api/stream/preview?drive=${previewItem.driveFileId}&size=600` : previewItem.url)}" alt="${this.escapeHtml(this.getDisplayTitle(previewItem))}" decoding="async" onerror="window.handleMediaThumbError && window.handleMediaThumbError(this, '${previewItem.driveFileId || ''}', '${previewItem.url || ''}')" />
             ` : (isAudio ? `
               <div class="macos-preview-audio-disc">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -6906,7 +6909,7 @@ class EntregaApp {
               </div>
             ` : (isVideo ? `
               ${(previewItem.customThumbnailUrl || previewItem.thumbnailUrl) ? `
-                <img class="macos-preview-thumb" src="${previewItem.customThumbnailUrl || previewItem.thumbnailUrl}" alt="${this.escapeHtml(this.getDisplayTitle(previewItem))}" />
+                <img class="macos-preview-thumb" src="${previewItem.customThumbnailUrl || previewItem.thumbnailUrl}" alt="${this.escapeHtml(this.getDisplayTitle(previewItem))}" decoding="async" onerror="window.handleMediaThumbError && window.handleMediaThumbError(this, '${previewItem.driveFileId || ''}', '')" />
               ` : `
                 <video class="macos-preview-video" src="${previewItem.previewUrl || previewItem.url || ''}${this.getVideoPreviewTimecode(previewItem)}" preload="metadata" muted playsinline></video>
               `}
@@ -7361,13 +7364,38 @@ class EntregaApp {
 
     // 3. Clique em Diretório ou Arquivo Avulso na coluna raiz
     viewport.querySelectorAll('.macos-col-proj').forEach(projEl => {
+      const openProjOrLooseFile = (targetProj) => {
+        if (!targetProj) return;
+        if ((targetProj.isFile || targetProj.isIsolatedFile) && targetProj.videos && targetProj.videos[0]) {
+          this.selectedProject = targetProj;
+          this.selectedVideo = targetProj.videos[0];
+          this.currentView = 'client_player';
+          this.isIsolatedFile = true;
+          const targetUrl = `/author?project=${encodeURIComponent(targetProj.id)}&video=${encodeURIComponent(targetProj.videos[0].id)}`;
+          window.history.pushState({}, '', targetUrl);
+          this.syncSidebarActiveProject(targetProj);
+          this.render();
+        } else {
+          this.openProject(targetProj);
+        }
+      };
+
       projEl.addEventListener('click', (e) => {
         e.stopPropagation();
+        const pId = projEl.getAttribute('data-project-id');
+        const targetProj = (this.data?.projects || []).find(p => p.id === pId);
+        const now = Date.now();
+        if (this._lastColProjTapId === pId && now - (this._lastColProjTapTime || 0) < 380) {
+          this._lastColProjTapId = null;
+          openProjOrLooseFile(targetProj);
+          return;
+        }
+        this._lastColProjTapId = pId;
+        this._lastColProjTapTime = now;
+
         this._columnsFocusedColType = 'projects';
         const col = projEl.closest('.macos-column');
         if (col) this._columnsFocusedColIndex = parseInt(col.getAttribute('data-col-index') || '0', 10);
-        const pId = projEl.getAttribute('data-project-id');
-        const targetProj = (this.data?.projects || []).find(p => p.id === pId);
         if (targetProj) {
           const isLoose = Boolean(targetProj.isFile || targetProj.isIsolatedFile);
           this.selectedProject = targetProj;
@@ -7392,20 +7420,7 @@ class EntregaApp {
         e.stopPropagation();
         const pId = projEl.getAttribute('data-project-id');
         const targetProj = (this.data?.projects || []).find(p => p.id === pId);
-        if (targetProj) {
-          if ((targetProj.isFile || targetProj.isIsolatedFile) && targetProj.videos && targetProj.videos[0]) {
-            this.selectedProject = targetProj;
-            this.selectedVideo = targetProj.videos[0];
-            this.currentView = 'client_player';
-            this.isIsolatedFile = true;
-            const targetUrl = `/author?project=${encodeURIComponent(targetProj.id)}&video=${encodeURIComponent(targetProj.videos[0].id)}`;
-            window.history.pushState({}, '', targetUrl);
-            this.syncSidebarActiveProject(targetProj);
-            this.render();
-          } else {
-            this.openProject(targetProj);
-          }
-        }
+        openProjOrLooseFile(targetProj);
       });
 
       // Suporte a arrastar da coluna para remanejar divisão ou categoria
@@ -7662,10 +7677,10 @@ class EntregaApp {
             } else {
               currentTrack.appendChild(newPreview);
             }
-            // Se não tinha preview antes, apenas garante que o preview fique visível sem animação longa
-            if (!hadPreview) {
-              scrollToAdvancedColumn(false);
-            }
+          // Em dispositivos mobile/telas estreitas, garante que a coluna de preview fique visível ao tocar em um arquivo
+          if (!hadPreview || window.innerWidth <= 768) {
+            scrollToAdvancedColumn(window.innerWidth <= 768);
+          }
           } else if (existingPreview) {
             existingPreview.remove();
           }
@@ -7705,9 +7720,8 @@ class EntregaApp {
         this.updateGalleryDynamicArea(container);
       });
 
-      // Duplo clique abre o player direto
-      itemEl.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
+      // Duplo clique ou duplo toque rápido no mobile abre o player direto
+      const openFileInPlayer = () => {
         const fileId = itemEl.getAttribute('data-file-id');
         const vid = (proj.videos || []).find(v => v.id === fileId);
         if (vid) {
@@ -7720,6 +7734,25 @@ class EntregaApp {
           window.history.pushState({}, '', targetUrl);
           this.render();
         }
+      };
+
+      itemEl.addEventListener('touchend', (e) => {
+        if (e.target.closest('.macos-col-checkbox') || this.isSelectionMode) return;
+        const fileId = itemEl.getAttribute('data-file-id');
+        const now = Date.now();
+        if (this._lastColFileTapId === fileId && now - (this._lastColFileTapTime || 0) < 380) {
+          this._lastColFileTapId = null;
+          e.preventDefault();
+          openFileInPlayer();
+          return;
+        }
+        this._lastColFileTapId = fileId;
+        this._lastColFileTapTime = now;
+      }, { passive: false });
+
+      itemEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        openFileInPlayer();
       });
     });
 
@@ -8345,13 +8378,16 @@ class EntregaApp {
       const isPsd = vid.subType === 'psd' || (vid.fileName && /\.psd$/i.test(vid.fileName));
       const isAi = vid.subType === 'ai' || (vid.fileName && /\.ai$/i.test(vid.fileName));
       const isDesign = isPsd || isAi;
+      const isNonNativeWebImg = /\.(heic|heif|tif|tiff|bmp|raw|cr2|nef|arw|dng|psd|ai)$/i.test(vid.fileName || vid.title || '');
       const initialDims = vid.dimensions || (vid.resolution && vid.resolution.includes('x') ? vid.resolution : (isDesign ? (isPsd ? 'PSD' : 'AI') : ''));
-      const imageSrc = isDesign ? (vid.previewUrl || `/api/stream/preview?drive=${vid.driveFileId}&size=2048`) : vid.url;
+      const imageSrc = (isDesign || isNonNativeWebImg)
+        ? (vid.previewUrl || (vid.driveFileId ? `/api/stream/preview?drive=${vid.driveFileId}&size=2048` : vid.url))
+        : vid.url;
       const downloadLabel = isPsd ? 'Baixar PSD' : (isAi ? 'Baixar AI' : 'Baixar Foto');
 
       // Photo Lightbox & Viewer
       playerMount.innerHTML = `
-        <div class="custom-image-wrapper" id="customImageWrapper">
+        <div class="custom-image-wrapper is-loading-photo" id="customImageWrapper">
           <div class="player-top-badge" id="photoTopBadge" style="opacity: 1; visibility: visible; display: flex; gap: 8px; align-items: center;">
             ${hasMultiplePhotos ? `<span id="photoIndexBadge" class="photo-index-pill">${photoIndex >= 0 ? photoIndex + 1 : 1} / ${photos.length}</span>` : ''}
             <span id="photoQualityLabel">${initialDims}</span>
@@ -8370,7 +8406,7 @@ class EntregaApp {
           </button>
           ` : ''}
 
-          <img class="custom-image-element" id="mainPhotoElement" src="${imageSrc}" alt="${this.escapeHtml(vid.title)}">
+          <img class="custom-image-element" id="mainPhotoElement" src="${imageSrc}" decoding="async" alt="${this.escapeHtml(vid.title)}">
           <div class="image-overlay-controls custom-image-toolbar">
             ${showCommentsBtn ? `
             <button class="btn-image-action" id="btnPhotoToggleComments" title="Mostrar ou ocultar comentários">
@@ -8385,15 +8421,17 @@ class EntregaApp {
             </a>
             <button class="btn-image-action" id="btnFullscreenPhoto" title="Visualizar em Tela Cheia">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
-              Tela Cheia
+              <span id="btnFullscreenPhotoText">Tela Cheia</span>
             </button>
           </div>
         </div>
       `;
 
+      const imgWrapper = document.getElementById('customImageWrapper');
       const mainPhoto = document.getElementById('mainPhotoElement');
       if (mainPhoto) {
         const updateDims = () => {
+          imgWrapper?.classList.remove('is-loading-photo');
           if (!mainPhoto.naturalWidth) return;
           const dims = `${mainPhoto.naturalWidth}x${mainPhoto.naturalHeight}`;
           const badgeLabel = document.getElementById('photoQualityLabel');
@@ -8406,13 +8444,39 @@ class EntregaApp {
             dlText.textContent = `${downloadLabel} ${sz ? `(${sz})` : `(${dims})`}`;
           }
         };
-        if (mainPhoto.complete) updateDims();
+        mainPhoto.onerror = () => {
+          if (vid.driveFileId && !mainPhoto.dataset.retriedPreview) {
+            mainPhoto.dataset.retriedPreview = '1';
+            mainPhoto.src = `/api/stream/preview?drive=${vid.driveFileId}&size=1600`;
+            return;
+          }
+          if (vid.thumbnailUrl && !mainPhoto.dataset.retriedThumb) {
+            mainPhoto.dataset.retriedThumb = '1';
+            mainPhoto.src = vid.thumbnailUrl;
+            return;
+          }
+          imgWrapper?.classList.remove('is-loading-photo');
+        };
+        if (mainPhoto.complete && mainPhoto.naturalWidth) updateDims();
         else mainPhoto.addEventListener('load', updateDims);
       }
 
-      const imgWrapper = document.getElementById('customImageWrapper');
       const btnFs = document.getElementById('btnFullscreenPhoto');
       if (btnFs && imgWrapper) {
+        const syncPhotoFsState = (active) => {
+          if (active) {
+            imgWrapper.classList.add('is-fullscreen');
+            document.body.classList.add('photo-fullscreen-active');
+            document.documentElement.classList.add('photo-fullscreen-active');
+          } else {
+            imgWrapper.classList.remove('is-fullscreen');
+            document.body.classList.remove('photo-fullscreen-active');
+            document.documentElement.classList.remove('photo-fullscreen-active');
+          }
+          const fsText = document.getElementById('btnFullscreenPhotoText');
+          if (fsText) fsText.textContent = active ? 'Sair' : 'Tela Cheia';
+        };
+
         const isPhotoFs = () => !!(
           (document.fullscreenElement && (document.fullscreenElement === imgWrapper || imgWrapper.contains(document.fullscreenElement))) ||
           (document.webkitFullscreenElement && (document.webkitFullscreenElement === imgWrapper || imgWrapper.contains(document.webkitFullscreenElement))) ||
@@ -8421,22 +8485,21 @@ class EntregaApp {
 
         const togglePhotoFs = () => {
           if (!isPhotoFs()) {
+            syncPhotoFsState(true);
             if (imgWrapper.requestFullscreen) {
               imgWrapper.requestFullscreen().catch(() => {});
             } else if (imgWrapper.webkitRequestFullscreen) {
-              imgWrapper.webkitRequestFullscreen();
-            } else {
-              imgWrapper.classList.add('is-fullscreen');
+              try { imgWrapper.webkitRequestFullscreen(); } catch (e) {}
             }
           } else {
             if (document.fullscreenElement || document.webkitFullscreenElement) {
               if (document.exitFullscreen) {
                 document.exitFullscreen().catch(() => {});
               } else if (document.webkitExitFullscreen) {
-                document.webkitExitFullscreen();
+                try { document.webkitExitFullscreen(); } catch (e) {}
               }
             }
-            imgWrapper.classList.remove('is-fullscreen');
+            syncPhotoFsState(false);
           }
         };
 
@@ -8447,11 +8510,7 @@ class EntregaApp {
             (document.fullscreenElement && (document.fullscreenElement === imgWrapper || imgWrapper.contains(document.fullscreenElement))) ||
             (document.webkitFullscreenElement && (document.webkitFullscreenElement === imgWrapper || imgWrapper.contains(document.webkitFullscreenElement)))
           );
-          if (!isCurrentFs) {
-            imgWrapper.classList.remove('is-fullscreen');
-          } else {
-            imgWrapper.classList.add('is-fullscreen');
-          }
+          syncPhotoFsState(isCurrentFs);
         };
 
         document.addEventListener('fullscreenchange', onPhotoFsChange);
@@ -8467,10 +8526,10 @@ class EntregaApp {
                 if (document.exitFullscreen) {
                   document.exitFullscreen().catch(() => {});
                 } else if (document.webkitExitFullscreen) {
-                  document.webkitExitFullscreen();
+                  try { document.webkitExitFullscreen(); } catch (err) {}
                 }
               }
-              imgWrapper.classList.remove('is-fullscreen');
+              syncPhotoFsState(false);
             }
           } else if (e.key === 'ArrowLeft' || e.code === 'ArrowLeft') {
             e.preventDefault();
@@ -8952,13 +9011,25 @@ class EntregaApp {
       dlText.textContent = `${downloadLabel} ${sz ? `(${sz})` : (initialDims && initialDims.includes('x') ? `(${initialDims})` : '')}`;
     }
 
-    // Update Main Photo Element smoothly
+    // Update Main Photo Element smoothly with loading spinner and race-condition protection
     const mainPhoto = document.getElementById('mainPhotoElement');
     if (mainPhoto) {
-      mainPhoto.style.opacity = '0.7';
+      const switchToken = (this._photoSwitchToken = (this._photoSwitchToken || 0) + 1);
+      const isNonNativeWebImg = /\.(heic|heif|tif|tiff|bmp|raw|cr2|nef|arw|dng|psd|ai)$/i.test(targetPhoto.fileName || targetPhoto.title || '');
+      const nextSrc = (isDesign || isNonNativeWebImg)
+        ? (targetPhoto.previewUrl || (targetPhoto.driveFileId ? `/api/stream/preview?drive=${targetPhoto.driveFileId}&size=2048` : targetPhoto.url))
+        : targetPhoto.url;
+
+      imgWrapper.classList.add('is-loading-photo');
+      mainPhoto.style.opacity = '0.55';
       mainPhoto.alt = targetPhoto.title;
-      mainPhoto.src = isDesign ? (targetPhoto.previewUrl || `/api/stream/preview?drive=${targetPhoto.driveFileId}&size=2048`) : targetPhoto.url;
+      delete mainPhoto.dataset.retriedPreview;
+      delete mainPhoto.dataset.retriedThumb;
+      mainPhoto.src = nextSrc;
+
       const updateDims = () => {
+        if (this._photoSwitchToken !== switchToken) return;
+        imgWrapper.classList.remove('is-loading-photo');
         mainPhoto.style.opacity = '1';
         if (!mainPhoto.naturalWidth) return;
         const dims = `${mainPhoto.naturalWidth}x${mainPhoto.naturalHeight}`;
@@ -8970,6 +9041,23 @@ class EntregaApp {
           dlText.textContent = `${downloadLabel} ${sz ? `(${sz})` : `(${dims})`}`;
         }
       };
+
+      mainPhoto.onerror = () => {
+        if (this._photoSwitchToken !== switchToken) return;
+        if (targetPhoto.driveFileId && !mainPhoto.dataset.retriedPreview) {
+          mainPhoto.dataset.retriedPreview = '1';
+          mainPhoto.src = `/api/stream/preview?drive=${targetPhoto.driveFileId}&size=1600`;
+          return;
+        }
+        if (targetPhoto.thumbnailUrl && !mainPhoto.dataset.retriedThumb) {
+          mainPhoto.dataset.retriedThumb = '1';
+          mainPhoto.src = targetPhoto.thumbnailUrl;
+          return;
+        }
+        imgWrapper.classList.remove('is-loading-photo');
+        mainPhoto.style.opacity = '1';
+      };
+
       if (mainPhoto.complete && mainPhoto.naturalWidth) {
         updateDims();
       } else {
@@ -12341,8 +12429,27 @@ class EntregaApp {
       saveSettingsHandler(e);
     });
 
-    // Browser navigation (back/forward)
+    // Browser navigation (back/forward) with immediate mobile media & fullscreen cleanup
     window.addEventListener('popstate', async () => {
+      try {
+        this.closeMobileSidebar();
+        document.querySelectorAll('.comment-lightbox-backdrop').forEach(el => el.remove());
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+          if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+          else if (document.webkitExitFullscreen) {
+            try { document.webkitExitFullscreen(); } catch (e) {}
+          }
+        }
+        document.body.classList.remove('video-fullscreen-active', 'photo-fullscreen-active');
+        document.documentElement.classList.remove('video-fullscreen-active', 'photo-fullscreen-active');
+        document.querySelectorAll('.custom-image-wrapper.is-fullscreen, .custom-player-wrapper.is-fullscreen').forEach(el => {
+          el.classList.remove('is-fullscreen', 'fullscreen-rotated-landscape');
+        });
+        if (this.playerInstance) {
+          this.playerInstance.destroy();
+          this.playerInstance = null;
+        }
+      } catch (e) {}
       await this.fetchData();
       this.detectRoute();
     });
@@ -12468,6 +12575,26 @@ window.showToast = function (message) {
   }, 3200);
 };
 
+
+// Global thumbnail error fallback for mobile/Drive rate-limits
+window.handleMediaThumbError = function (imgEl, driveFileId, fallbackStreamUrl) {
+  if (!imgEl) return;
+  const stage = parseInt(imgEl.dataset.fallbackStage || '0', 10);
+  if (stage === 0 && driveFileId) {
+    imgEl.dataset.fallbackStage = '1';
+    const previewUrl = `/api/stream/preview?drive=${encodeURIComponent(driveFileId)}&size=600&retry=1`;
+    if (imgEl.src !== window.location.origin + previewUrl) {
+      imgEl.src = previewUrl;
+      return;
+    }
+  }
+  if (stage <= 1 && fallbackStreamUrl) {
+    imgEl.dataset.fallbackStage = '2';
+    imgEl.src = fallbackStreamUrl;
+    return;
+  }
+  imgEl.onerror = null;
+};
 
 document.addEventListener('DOMContentLoaded', () => {
   window.app = new EntregaApp();

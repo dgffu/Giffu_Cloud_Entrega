@@ -9052,6 +9052,52 @@ body.video-fullscreen-active .mobile-portrait-guard {
   color: #64748b;
 }
 
+/* Mobile Navigation, Breadcrumbs & Columns Responsive Polish */
+@media (max-width: 768px) {
+  .content-header-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .project-title-wrapper {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .project-breadcrumb {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .breadcrumb-current,
+  .breadcrumb-item {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .project-actions-right {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .macos-columns-viewport {
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+
+  .macos-column,
+  .macos-preview-column {
+    scroll-snap-align: start;
+  }
+}
+
+
 
 
 

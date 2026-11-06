@@ -37,6 +37,8 @@ class CustomVideoPlayer {
   setupInactivityTimer() {
     this.inactivityTimer = null;
     this.isInteracting = false;
+    this._lastTouchTime = 0;
+    this._wasInactiveOnTouchStart = false;
 
     this.showHUD = () => {
       this.container.classList.add('user-active');
@@ -50,7 +52,7 @@ class CustomVideoPlayer {
             this.container.classList.remove('user-active');
             this.container.classList.add('user-inactive');
           }
-        }, 2000);
+        }, 2500);
       }
     };
 
@@ -66,17 +68,27 @@ class CustomVideoPlayer {
       this.showHUD();
     };
 
+    this.onTouchStart = (e) => {
+      this._lastTouchTime = Date.now();
+      this._wasInactiveOnTouchStart = this.container.classList.contains('user-inactive');
+      const isControlTouch = e.target && e.target.closest('.player-controls-bar, .center-play-btn, .player-top-badge');
+      if (isControlTouch || this._wasInactiveOnTouchStart) {
+        this.showHUD();
+      }
+    };
+
     this.onMouseLeave = () => {
+      if (Date.now() - this._lastTouchTime < 800) return;
       this.hideHUDImmediate();
     };
 
     this.container.addEventListener('mousemove', this.onActivity);
     this.container.addEventListener('mouseenter', this.onActivity);
     this.container.addEventListener('mouseleave', this.onMouseLeave);
-    this.container.addEventListener('touchstart', this.onActivity, { passive: true });
+    this.container.addEventListener('touchstart', this.onTouchStart, { passive: true });
     this.container.addEventListener('touchmove', this.onActivity, { passive: true });
 
-    // Exibe inicialmente ao abrir e inicia o timer de 2 segundos
+    // Exibe inicialmente ao abrir e inicia o timer
     this.showHUD();
   }
 
@@ -144,12 +156,12 @@ class CustomVideoPlayer {
             </button>
 
             <!-- Frame backward (-1 frame) -->
-            <button class="player-btn" id="btnStepBack" title="Voltar 1 frame (Shift + ←)">
+            <button class="player-btn frame-step-btn" id="btnStepBack" title="Voltar 1 frame (Shift + ←)">
               <svg viewBox="0 0 24 24"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>
             </button>
 
             <!-- Frame forward (+1 frame) -->
-            <button class="player-btn" id="btnStepForward" title="Avançar 1 frame (Shift + →)">
+            <button class="player-btn frame-step-btn" id="btnStepForward" title="Avançar 1 frame (Shift + →)">
               <svg viewBox="0 0 24 24"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>
             </button>
 
@@ -345,10 +357,13 @@ class CustomVideoPlayer {
   toggleMute() {
     this.video.muted = !this.video.muted;
     if (this.video.muted) {
-      this.volumeSlider.value = 0;
+      if (this.volumeSlider) this.volumeSlider.value = 0;
       this.volumeIcon.innerHTML = '<path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>';
     } else {
-      this.volumeSlider.value = this.video.volume;
+      try {
+        if (this.video.volume === 0) this.video.volume = 1;
+      } catch (e) {}
+      if (this.volumeSlider) this.volumeSlider.value = this.video.volume || 1;
       this.volumeIcon.innerHTML = '<path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>';
     }
   }
@@ -802,10 +817,11 @@ class CustomVideoPlayer {
 
     this.video.addEventListener('playing', () => {
       this.isPlaying = true;
+      this._networkRetryCount = 0;
       this.setBuffering(false);
     });
 
-    // Handle format/codec error (e.g. non-Safari browser attempting ProRes standard without alpha)
+    // Handle format/codec error or transient mobile network error
     this.video.addEventListener('error', () => {
       this.setBuffering(false);
       const err = this.video.error;
@@ -813,11 +829,37 @@ class CustomVideoPlayer {
       if (this.isMov) {
         this.checkVideoCompatibilityStatus(true);
       }
+      // Recuperação automática para falhas transitórias de rede/stream no mobile
+      if (!this.isAlpha && err && (err.code === 2 || err.code === 3) && (this._networkRetryCount || 0) < 2) {
+        this._networkRetryCount = (this._networkRetryCount || 0) + 1;
+        const savedTime = this.video.currentTime || 0;
+        const wasPlaying = this.isPlaying;
+        setTimeout(() => {
+          if (!this.video) return;
+          try {
+            this.video.load();
+            if (savedTime > 0) {
+              this.video.addEventListener('loadedmetadata', () => {
+                try { this.video.currentTime = savedTime; } catch (e) {}
+                if (wasPlaying) this.play();
+              }, { once: true });
+            } else if (wasPlaying) {
+              this.play();
+            }
+          } catch (e) {}
+        }, 700);
+      }
     });
 
-    // Play/Pause button clicks
+    // Play/Pause button clicks (com separação inteligente entre despertar HUD no touch e pausar)
     this.centerPlayBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      const isTouchTap = Date.now() - (this._lastTouchTime || 0) < 650;
+      if (isTouchTap && this._wasInactiveOnTouchStart && !this.video.paused) {
+        this._wasInactiveOnTouchStart = false;
+        this.showHUD();
+        return;
+      }
       this.showHUD();
       this.togglePlay();
     });
@@ -829,6 +871,21 @@ class CustomVideoPlayer {
     });
 
     this.video.addEventListener('click', () => {
+      const isTouchTap = Date.now() - (this._lastTouchTime || 0) < 650;
+      if (isTouchTap) {
+        if (this.video.paused || this.video.ended) {
+          this.showHUD();
+          this.togglePlay();
+        } else if (this._wasInactiveOnTouchStart) {
+          this._wasInactiveOnTouchStart = false;
+          this.showHUD();
+        } else if (this.container.classList.contains('user-active')) {
+          this.hideHUDImmediate();
+        } else {
+          this.showHUD();
+        }
+        return;
+      }
       this.showHUD();
       this.togglePlay();
     });
@@ -861,6 +918,7 @@ class CustomVideoPlayer {
       if (this.isBuffering && !this.video.paused) {
         this.setBuffering(false);
       }
+      if (this.isSeeking) return;
       const cur = this.video.currentTime;
       const dur = this.video.duration || 0;
       const percent = dur > 0 ? (cur / dur) * 100 : 0;
@@ -893,60 +951,95 @@ class CustomVideoPlayer {
       return Math.max(0, Math.min(1, (clientX - rect.left) / (rect.width || 1)));
     };
 
-    const handleTimelineSeek = (clientX, clientY) => {
+    this.isSeeking = false;
+    this._lastSeekCommitTime = 0;
+    this._pendingSeekRatio = null;
+
+    const handleTimelineSeek = (clientX, clientY, commitImmediate = false) => {
       const pos = getTimelineRatio(clientX, clientY);
       const dur = this.video.duration || 0;
-      this.video.currentTime = pos * dur;
+      const targetTime = pos * dur;
+      const percent = pos * 100;
+
+      // Atualiza visualmente a barra e o timecode na hora (60fps suave no touch)
+      this.progressBar.style.width = `${percent}%`;
+      this.scrubberHandle.style.left = `${percent}%`;
+      if (dur > 0) {
+        this.timecodeDisplay.textContent = `${this.formatTime(targetTime)} / ${this.formatTime(dur)}`;
+      }
+      if (this.timeTooltip) {
+        this.timeTooltip.style.left = `${percent}%`;
+        this.timeTooltip.textContent = this.formatTime(targetTime);
+      }
+
+      this._pendingSeekRatio = pos;
+      const now = Date.now();
+      if (dur > 0 && (commitImmediate || now - this._lastSeekCommitTime >= 180)) {
+        this._lastSeekCommitTime = now;
+        try {
+          this.video.currentTime = targetTime;
+        } catch (e) {}
+      }
     };
 
-    let isSeeking = false;
+    const finishTimelineSeek = () => {
+      if (this.isSeeking) {
+        const dur = this.video.duration || 0;
+        if (this._pendingSeekRatio !== null && dur > 0) {
+          try {
+            this.video.currentTime = this._pendingSeekRatio * dur;
+          } catch (e) {}
+        }
+        this.isSeeking = false;
+        this.isInteracting = false;
+        this._pendingSeekRatio = null;
+        this.showHUD();
+      }
+    };
+
     this.timelineWrapper.addEventListener('mousedown', (e) => {
-      isSeeking = true;
+      this.isSeeking = true;
       this.isInteracting = true;
       this.showHUD();
-      handleTimelineSeek(e.clientX, e.clientY);
+      handleTimelineSeek(e.clientX, e.clientY, true);
     });
 
     this.onTimelineMouseMove = (e) => {
-      if (isSeeking) {
+      if (this.isSeeking) {
         this.showHUD();
-        handleTimelineSeek(e.clientX, e.clientY);
+        handleTimelineSeek(e.clientX, e.clientY, false);
       }
     };
     window.addEventListener('mousemove', this.onTimelineMouseMove);
 
     this.onTimelineMouseUp = () => {
-      if (isSeeking) {
-        isSeeking = false;
-        this.isInteracting = false;
-        this.showHUD();
-      }
+      finishTimelineSeek();
     };
     window.addEventListener('mouseup', this.onTimelineMouseUp);
 
     this.timelineWrapper.addEventListener('touchstart', (e) => {
       if (e.touches && e.touches.length > 0) {
-        isSeeking = true;
+        this.isSeeking = true;
         this.isInteracting = true;
         this.showHUD();
-        handleTimelineSeek(e.touches[0].clientX, e.touches[0].clientY);
+        handleTimelineSeek(e.touches[0].clientX, e.touches[0].clientY, true);
       }
     }, { passive: true });
 
     this.timelineWrapper.addEventListener('touchmove', (e) => {
-      if (isSeeking && e.touches && e.touches.length > 0) {
+      if (this.isSeeking && e.touches && e.touches.length > 0) {
         if (e.cancelable) e.preventDefault();
         this.showHUD();
-        handleTimelineSeek(e.touches[0].clientX, e.touches[0].clientY);
+        handleTimelineSeek(e.touches[0].clientX, e.touches[0].clientY, false);
       }
     }, { passive: false });
 
     this.timelineWrapper.addEventListener('touchend', () => {
-      if (isSeeking) {
-        isSeeking = false;
-        this.isInteracting = false;
-        this.showHUD();
-      }
+      finishTimelineSeek();
+    }, { passive: true });
+
+    this.timelineWrapper.addEventListener('touchcancel', () => {
+      finishTimelineSeek();
     }, { passive: true });
 
     // Timeline hover tooltip
@@ -1026,7 +1119,9 @@ class CustomVideoPlayer {
       this.showHUD();
       showVolumeBar();
       const val = parseFloat(e.target.value);
-      this.video.volume = val;
+      try {
+        this.video.volume = val;
+      } catch (err) {}
       this.video.muted = val === 0;
     });
 
@@ -1349,7 +1444,9 @@ class CustomVideoPlayer {
       this.container.removeEventListener('mousemove', this.onActivity);
       this.container.removeEventListener('mouseenter', this.onActivity);
       this.container.removeEventListener('mouseleave', this.onMouseLeave);
-      this.container.removeEventListener('touchstart', this.onActivity);
+      if (this.onTouchStart) {
+        this.container.removeEventListener('touchstart', this.onTouchStart);
+      }
       this.container.removeEventListener('touchmove', this.onActivity);
     }
     if (this.onOrientationChange) {

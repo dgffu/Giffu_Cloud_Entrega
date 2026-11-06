@@ -152,10 +152,12 @@ body {
   pointer-events: none;
 }
 
-.brand-badge span.app-subtitle {
+.brand-badge span.app-subtitle,
+.app-subtitle {
   font-weight: 400;
   opacity: 0.95;
   font-size: 15px;
+  margin-left: -4px;
 }
 
 /* Mobile Hamburger Menu Toggle Button (default hidden on desktop) */

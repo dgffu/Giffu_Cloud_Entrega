@@ -15,8 +15,8 @@ class CustomAudioPlayer {
     this.isMuted = false;
     this.volume = 1.0;
     this.isLooping = false;
-    this.playbackSpeeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-    this.currentSpeedIndex = 2; // 1.0x
+    this.playbackSpeeds = [0.5, 1, 2];
+    this.currentSpeedIndex = 1; // 1x (padrão sempre)
     this.animationFrameId = null;
     this.waveformBars = 216;
     this.baseWaveform = null;
@@ -243,7 +243,7 @@ class CustomAudioPlayer {
             </button>
 
             <!-- Playback Speed -->
-            <button class="audio-pill-btn" id="btnAudioSpeed" title="Alterar velocidade">1.0x</button>
+            <button class="audio-pill-btn" id="btnAudioSpeed" title="Alterar velocidade">1x</button>
 
             <!-- Comments Toggle -->
             <button class="audio-ctrl-btn" id="btnAudioComments" title="Mostrar/Ocultar Comentários (C)">

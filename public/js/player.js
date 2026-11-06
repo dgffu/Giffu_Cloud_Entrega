@@ -10,8 +10,8 @@ class CustomVideoPlayer {
     this.isPlaying = false;
     this.isBuffering = false;
     this.fps = 30; // standard 30fps for frame stepping
-    this.playbackSpeeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-    this.currentSpeedIndex = 2; // 1.0x
+    this.playbackSpeeds = [0.5, 1, 2];
+    this.currentSpeedIndex = 1; // 1x (padrão sempre)
 
     const fileName = (this.videoData.fileName || this.videoData.title || '').toLowerCase();
     const mimeType = (this.videoData.mimeType || '').toLowerCase();
@@ -167,7 +167,7 @@ class CustomVideoPlayer {
 
           <div class="player-controls-right">
             <!-- Playback Speed -->
-            <span class="player-speed-badge" id="btnSpeed" title="Velocidade de Reprodução">1.0x</span>
+            <span class="player-speed-badge" id="btnSpeed" title="Velocidade de Reprodução">1x</span>
 
             <!-- Picture-in-Picture -->
             <button class="player-btn" id="btnPiP" title="Picture in Picture">

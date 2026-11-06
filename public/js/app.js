@@ -1550,9 +1550,139 @@ class EntregaApp {
     }
   }
 
+  handlePwaStartup() {
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    if (isStandalone) {
+      document.documentElement.classList.add('is-pwa-standalone');
+      try {
+        const targetUrl = localStorage.getItem('giffu_pwa_target_url');
+        if (targetUrl) {
+          const u = new URL(targetUrl, window.location.origin);
+          if (u.origin === window.location.origin) {
+            localStorage.removeItem('giffu_pwa_target_url');
+            if (window.location.href !== u.href) {
+              window.location.replace(u.href);
+              return true;
+            }
+          }
+        }
+      } catch (e) {
+        localStorage.removeItem('giffu_pwa_target_url');
+      }
+    }
+    return false;
+  }
+
+  setupPwaInstallSupport() {
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch((err) => {
+          console.warn('SW registration failed:', err);
+        });
+      });
+    }
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      this.deferredPwaPrompt = e;
+    });
+
+    const btnPromptNo = document.getElementById('btnWebappPromptNo');
+    const btnPromptYes = document.getElementById('btnWebappPromptYes');
+    const promptEl = document.getElementById('mobileWebAppPrompt');
+
+    if (btnPromptNo && promptEl) {
+      btnPromptNo.addEventListener('click', () => {
+        promptEl.style.display = 'none';
+        sessionStorage.setItem('giffu_pwa_prompt_dismissed', 'true');
+      });
+    }
+
+    if (btnPromptYes) {
+      btnPromptYes.addEventListener('click', () => {
+        this.triggerWebAppInstall();
+      });
+    }
+
+    const modalIos = document.getElementById('modalIosWebappGuide');
+    const btnCloseIos = document.getElementById('btnCloseIosWebappGuide');
+    const btnDismissIos = document.getElementById('btnDismissIosWebappGuide');
+
+    if (btnCloseIos && modalIos) {
+      btnCloseIos.addEventListener('click', () => {
+        modalIos.style.display = 'none';
+      });
+    }
+    if (btnDismissIos && modalIos) {
+      btnDismissIos.addEventListener('click', () => {
+        modalIos.style.display = 'none';
+      });
+    }
+    if (modalIos) {
+      modalIos.addEventListener('click', (e) => {
+        if (e.target === modalIos) modalIos.style.display = 'none';
+      });
+    }
+  }
+
+  checkMobileWebAppPrompt(vid) {
+    if (!vid) return;
+    const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (!isMobile) return;
+
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    if (isStandalone) return;
+
+    if (sessionStorage.getItem('giffu_pwa_prompt_dismissed') === 'true') return;
+
+    const promptEl = document.getElementById('mobileWebAppPrompt');
+    if (promptEl) {
+      promptEl.style.display = 'block';
+    }
+  }
+
+  async triggerWebAppInstall() {
+    try {
+      localStorage.setItem('giffu_pwa_target_url', window.location.href);
+    } catch (e) {}
+
+    const promptEl = document.getElementById('mobileWebAppPrompt');
+    if (promptEl) promptEl.style.display = 'none';
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS) {
+      const modalIos = document.getElementById('modalIosWebappGuide');
+      if (modalIos) {
+        modalIos.style.display = 'flex';
+      }
+      return;
+    }
+
+    // Android / Chromium
+    if (this.deferredPwaPrompt) {
+      try {
+        this.deferredPwaPrompt.prompt();
+        const choice = await this.deferredPwaPrompt.userChoice;
+        if (choice && choice.outcome === 'accepted') {
+          if (window.showToast) window.showToast('Web App adicionado com sucesso!');
+        }
+      } catch (err) {
+        console.warn('Erro ao acionar prompt PWA:', err);
+      } finally {
+        this.deferredPwaPrompt = null;
+      }
+    } else {
+      if (window.showToast) {
+        window.showToast('Toque no menu (⋮) do navegador e selecione "Adicionar à tela inicial" ou "Instalar app"');
+      }
+    }
+  }
+
   async init() {
+    if (this.handlePwaStartup()) return;
     this.setupTheme();
     this.setupMobileOrientationGuard();
+    this.setupPwaInstallSupport();
     await window.Auth.init();
     this.authorSession = this.loadAuthorSession();
     await this.fetchData();
@@ -2615,6 +2745,8 @@ class EntregaApp {
       this.playerInstance = null;
     }
     this.cleanupPhotoFullscreen();
+    const existingPrompt = document.getElementById('mobileWebAppPrompt');
+    if (existingPrompt) existingPrompt.style.display = 'none';
     this.selectedProject = null;
     this.selectedVideo = null;
     this.currentFolderId = null;
@@ -2642,6 +2774,8 @@ class EntregaApp {
       this.playerInstance = null;
     }
     this.cleanupPhotoFullscreen();
+    const existingPrompt = document.getElementById('mobileWebAppPrompt');
+    if (existingPrompt) existingPrompt.style.display = 'none';
     // Ao abrir um diretório a partir da barra lateral ou lobby, respeita a preferência configurada do projeto
     this._isColumnsNavActive = false;
     this.selectedProject = proj;
@@ -3804,6 +3938,8 @@ class EntregaApp {
       this.playerInstance = null;
     }
     this.cleanupPhotoFullscreen();
+    const existingPrompt = document.getElementById('mobileWebAppPrompt');
+    if (existingPrompt) existingPrompt.style.display = 'none';
 
     const gData = this.getGalleryData() || { proj: this.selectedProject, folders: (this.selectedProject?.folders || []) };
 
@@ -4774,6 +4910,8 @@ class EntregaApp {
       this.playerInstance = null;
     }
     this.cleanupPhotoFullscreen();
+    const existingPrompt = document.getElementById('mobileWebAppPrompt');
+    if (existingPrompt) existingPrompt.style.display = 'none';
 
     // Empty state when no projects exist
     if (!this.selectedProject || !this.data.projects || this.data.projects.length === 0) {
@@ -8071,6 +8209,8 @@ class EntregaApp {
       this.playerInstance = null;
     }
     this.cleanupPhotoFullscreen();
+    const existingPrompt = document.getElementById('mobileWebAppPrompt');
+    if (existingPrompt) existingPrompt.style.display = 'none';
 
     if (!this.selectedProject || !this.selectedVideo) {
       this.currentView = this.isClientMode ? 'client_gallery' : 'author';
@@ -8596,6 +8736,8 @@ class EntregaApp {
           await this.resetVideoCoverFrame(proj.id, vid.id);
         }
       });
+      // Sugerir "Abrir no Web App" no mobile quando abrir um vídeo
+      this.checkMobileWebAppPrompt(vid);
     }
 
     // Initialize Comments Controller

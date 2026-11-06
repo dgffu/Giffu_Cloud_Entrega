@@ -34,9 +34,12 @@ app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
-// Bloqueia qualquer tentativa de acesso HTTP direto a arquivos de dados ou JSONs internos
+// Bloqueia qualquer tentativa de acesso HTTP direto a arquivos de dados ou JSONs internos (exceto manifest.json do PWA)
 app.use((req, res, next) => {
   const reqPath = (req.path || '').toLowerCase();
+  if (reqPath === '/manifest.json') {
+    return next();
+  }
   if (reqPath.startsWith('/data') || (reqPath.endsWith('.json') && !reqPath.startsWith('/api/'))) {
     return res.status(403).json({ error: 'Acesso negado' });
   }

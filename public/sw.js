@@ -19,3 +19,4 @@ self.addEventListener('fetch', (event) => {
   // Standard fetch pass-through to ensure PWA criteria
   return;
 });
+

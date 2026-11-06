@@ -1525,6 +1525,52 @@ class EntregaApp {
     const errorEl = document.getElementById('authorLoginError');
     const noticeEl = document.getElementById('authorGateNotice');
 
+    const btnToggleAbout = document.getElementById('btnToggleAboutPopover');
+    const aboutPopover = document.getElementById('aboutPopover');
+    const btnCloseAbout = document.getElementById('btnCloseAboutPopover');
+
+    if (btnToggleAbout && aboutPopover) {
+      btnToggleAbout.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = aboutPopover.style.display !== 'none';
+        aboutPopover.style.display = isOpen ? 'none' : 'block';
+        btnToggleAbout.classList.toggle('active', !isOpen);
+      };
+
+      if (btnCloseAbout) {
+        btnCloseAbout.onclick = (e) => {
+          e.stopPropagation();
+          aboutPopover.style.display = 'none';
+          btnToggleAbout.classList.remove('active');
+        };
+      }
+
+      if (!this._aboutPopoverDocClickBound) {
+        this._aboutPopoverDocClickBound = true;
+        document.addEventListener('click', (e) => {
+          const popover = document.getElementById('aboutPopover');
+          const btn = document.getElementById('btnToggleAboutPopover');
+          if (popover && popover.style.display !== 'none') {
+            if (!popover.contains(e.target) && (!btn || !btn.contains(e.target))) {
+              popover.style.display = 'none';
+              if (btn) btn.classList.remove('active');
+            }
+          }
+        });
+
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            const popover = document.getElementById('aboutPopover');
+            const btn = document.getElementById('btnToggleAboutPopover');
+            if (popover && popover.style.display !== 'none') {
+              popover.style.display = 'none';
+              if (btn) btn.classList.remove('active');
+            }
+          }
+        });
+      }
+    }
+
     if (noticeEl) {
       noticeEl.style.display = 'none';
     }

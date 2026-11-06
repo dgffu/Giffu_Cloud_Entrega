@@ -2021,6 +2021,161 @@ body.is-dragging-directory .category-header {
   box-shadow: var(--shadow-lg);
 }
 
+.login-gate-brand-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 24px;
+  position: relative;
+}
+
+.login-gate-brand-row .brand-badge {
+  margin-bottom: 0 !important;
+}
+
+.login-gate-info-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.login-gate-info-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.login-gate-info-btn:hover,
+.login-gate-info-btn.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: scale(1.06);
+}
+
+.login-gate-info-popover {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 300px;
+  max-width: min(300px, calc(100vw - 48px));
+  background: #181b22;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  text-align: left;
+  animation: popoverFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes popoverFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Espetinho no centro pra cima apontado para o i */
+.popover-arrow-up {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 11px;
+  height: 11px;
+  background: #181b22;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.popover-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.2px;
+}
+
+.popover-close-btn {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.popover-close-btn:hover {
+  color: #ffffff;
+}
+
+.popover-text {
+  font-size: 12.5px;
+  color: #a0aec0;
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* Light Theme overrides for popover */
+[data-theme="light"] .login-gate-info-btn {
+  background: #f1f5f9;
+  color: #64748b;
+  border-color: #cbd5e1;
+}
+[data-theme="light"] .login-gate-info-btn:hover,
+[data-theme="light"] .login-gate-info-btn.active {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+[data-theme="light"] .login-gate-info-popover {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+[data-theme="light"] .popover-arrow-up {
+  background: #ffffff;
+  border-left-color: #cbd5e1;
+  border-top-color: #cbd5e1;
+}
+[data-theme="light"] .popover-title {
+  color: #0f172a;
+}
+[data-theme="light"] .popover-text {
+  color: #475569;
+}
+[data-theme="light"] .popover-close-btn {
+  color: #64748b;
+}
+[data-theme="light"] .popover-close-btn:hover {
+  color: #0f172a;
+}
+
 .login-gate-title {
   font-size: 20px;
   font-weight: 700;

@@ -868,8 +868,11 @@ app.put('/api/projects/:id/videos/:videoId/comments', requireAuthor, async (req,
 });
 
 // 3.1.3 Definir frame como capa personalizada do vídeo
-const COVERS_DIR = path.join(process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data'), 'covers');
+const APP_DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
+const COVERS_DIR = path.join(APP_DATA_DIR, 'covers');
 try { fs.mkdirSync(COVERS_DIR, { recursive: true }); } catch (e) {}
+const PREVIEW_CACHE_DIR = path.join(APP_DATA_DIR, 'preview_cache');
+try { fs.mkdirSync(PREVIEW_CACHE_DIR, { recursive: true }); } catch (e) {}
 
 app.post('/api/projects/:id/videos/:videoId/cover', requireAuthor, async (req, res) => {
   const userDb = storage.getUserDb(req.user.id);
@@ -970,6 +973,291 @@ app.get('/api/covers/:fileName', (req, res) => {
   res.setHeader('Content-Type', ctype);
   res.setHeader('Cache-Control', 'public, max-age=2592000'); // 30 dias de cache
   fs.createReadStream(filePath).pipe(res);
+});
+
+// Helpers para Open Graph e pré-visualizações ricas de links (WhatsApp, Telegram, redes sociais)
+function findCustomCoverFile(videoId, driveFileId) {
+  try {
+    const candidates = [];
+    if (videoId) candidates.push(`cover_${videoId}_`);
+    if (driveFileId) candidates.push(`cover_vid-${driveFileId}_`);
+    const files = fs.readdirSync(COVERS_DIR);
+    for (const c of candidates) {
+      const match = files.find(f => f.startsWith(c));
+      if (match) return path.join(COVERS_DIR, match);
+    }
+  } catch (e) {}
+  return null;
+}
+
+function sendDefaultOgIcon(res) {
+  const iconPath = path.join(__dirname, 'public', 'assets', 'icon-512.png');
+  if (fs.existsSync(iconPath)) {
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+    return fs.createReadStream(iconPath).pipe(res);
+  }
+  res.status(404).end();
+}
+
+function getRequestOrigin(req, userDb) {
+  if (!req) {
+    if (userDb && userDb.settings && userDb.settings.baseDomain) {
+      const domain = userDb.settings.baseDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+      return `https://${domain}`;
+    }
+    return 'https://cloud.giffu.com.br';
+  }
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  const proto = (forwardedProto ? forwardedProto.split(',')[0].trim() : (req.connection && req.connection.encrypted ? 'https' : 'http')) || 'https';
+  let host = req.headers['x-forwarded-host'] || req.headers.host || '';
+  if (host.includes(',')) host = host.split(',')[0].trim();
+  if (!host || host.startsWith('127.0.0.1') || host.startsWith('localhost')) {
+    if (userDb && userDb.settings && userDb.settings.baseDomain) {
+      host = userDb.settings.baseDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    } else {
+      host = 'cloud.giffu.com.br';
+    }
+  }
+  const effectiveProto = (host.includes('giffu.com.br') || host.includes('cloud.')) ? 'https' : proto;
+  return `${effectiveProto}://${host}`;
+}
+
+function getOgImageUrl(req, userDb, options = {}) {
+  const origin = getRequestOrigin(req, userDb);
+  const { code, drive, video, proj, cover } = options;
+  const params = new URLSearchParams();
+  if (code) params.set('code', code);
+  if (drive) params.set('drive', drive);
+  if (video) params.set('video', video);
+  if (proj) params.set('proj', proj);
+  if (cover) params.set('cover', cover);
+  const qs = params.toString();
+  return qs ? `${origin}/api/og-image?${qs}` : `${origin}/assets/icon-512.png`;
+}
+
+// Servir capa ou thumbnail padrão para pré-visualização de links (Open Graph / WhatsApp / Telegram)
+app.get('/api/og-image', async (req, res) => {
+  try {
+    const rawCode = (req.query.code || '').trim();
+    const driveId = (req.query.drive || '').trim();
+    const videoId = (req.query.video || '').trim();
+    const projIdOrSlug = (req.query.proj || '').trim();
+    const coverParam = (req.query.cover || '').trim();
+
+    // 1. Capa direta se informada
+    if (coverParam) {
+      const safeName = path.basename(coverParam);
+      const filePath = path.join(COVERS_DIR, safeName);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+        const ext = path.extname(safeName).toLowerCase();
+        const ctype = ext === '.png' ? 'image/png' : (ext === '.webp' ? 'image/webp' : 'image/jpeg');
+        res.setHeader('Content-Type', ctype);
+        res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+        return fs.createReadStream(filePath).pipe(res);
+      }
+    }
+
+    let targetVideo = null;
+    let targetProject = null;
+    let targetUserDb = null;
+    let targetDriveId = driveId;
+
+    // 2. Resolução por shortCode ou slug
+    if (rawCode) {
+      const resolved = storage.resolveShortLink(rawCode);
+      if (resolved) {
+        targetProject = resolved.project;
+        targetUserDb = resolved.userDb;
+        if (resolved.type === 'file' && resolved.videoId) {
+          targetVideo = (targetProject.videos || []).find(v => v.id === resolved.videoId || v.driveFileId === resolved.videoId || v.shortCode === rawCode);
+        } else if (resolved.type === 'folder' && resolved.folderId) {
+          const folderVids = (targetProject.videos || []).filter(v => v.driveFolderId === resolved.folderId || (v.folderPath && v.folderPath.includes(resolved.folderId)));
+          targetVideo = folderVids.find(v => v.hasCustomCover || v.coverUrl) || folderVids[0] || null;
+        } else if (resolved.type === 'project') {
+          targetVideo = (targetProject.videos || [])[0] || null;
+        }
+      }
+    }
+
+    // 3. Resolução por driveId se ainda não localizou targetVideo
+    if (!targetVideo && targetDriveId) {
+      const found = storage.findVideoByDriveId(targetDriveId);
+      if (found) {
+        targetVideo = found.video;
+        targetProject = found.project;
+        targetUserDb = found.userDb;
+      }
+    }
+
+    // 4. Resolução por videoId se ainda não localizou targetVideo
+    if (!targetVideo && videoId) {
+      const users = ['usr_novelfilmes_gmail_com', 'usr_102181345952808006205', 'usr_105551241729647220818'];
+      for (const uid of users) {
+        const uDb = storage.getUserDb(uid);
+        if (!uDb) continue;
+        for (const p of (uDb.projects || [])) {
+          const v = (p.videos || []).find(item => item.id === videoId || item.driveFileId === videoId);
+          if (v) {
+            targetVideo = v;
+            targetProject = p;
+            targetUserDb = uDb;
+            break;
+          }
+        }
+        if (targetVideo) break;
+      }
+    }
+
+    // 5. Resolução por projeto se ainda não localizou targetVideo
+    if (!targetVideo && projIdOrSlug) {
+      const foundProj = storage.findProjectBySlug(projIdOrSlug);
+      if (foundProj && foundProj.project) {
+        targetProject = foundProj.project;
+        targetUserDb = foundProj.userDb;
+        targetVideo = (targetProject.videos || [])[0] || null;
+      }
+    }
+
+    if (targetVideo && !targetDriveId && targetVideo.driveFileId) {
+      targetDriveId = targetVideo.driveFileId;
+    }
+
+    // REGRA 1: Capa manual definida pelo usuário (se houver, prioridade máxima)
+    const hasManualCover = Boolean(
+      targetVideo && (
+        targetVideo.hasCustomCover === true ||
+        (targetVideo.coverUrl && targetVideo.coverUrl.startsWith('/api/covers/')) ||
+        (targetVideo.customThumbnailUrl && targetVideo.customThumbnailUrl.startsWith('/api/covers/'))
+      )
+    );
+
+    if (hasManualCover) {
+      const coverUrl = targetVideo.coverUrl || targetVideo.customThumbnailUrl;
+      const safeName = path.basename(coverUrl);
+      const filePath = path.join(COVERS_DIR, safeName);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+        const ext = path.extname(safeName).toLowerCase();
+        const ctype = ext === '.png' ? 'image/png' : (ext === '.webp' ? 'image/webp' : 'image/jpeg');
+        res.setHeader('Content-Type', ctype);
+        res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+        return fs.createReadStream(filePath).pipe(res);
+      }
+    }
+
+    // Busca arquivo de capa manual correspondente no diretório de capas se existir
+    const diskCustomCover = findCustomCoverFile(targetVideo ? targetVideo.id : videoId, targetDriveId);
+    if (diskCustomCover && fs.existsSync(diskCustomCover) && fs.statSync(diskCustomCover).size > 0) {
+      const ext = path.extname(diskCustomCover).toLowerCase();
+      const ctype = ext === '.png' ? 'image/png' : (ext === '.webp' ? 'image/webp' : 'image/jpeg');
+      res.setHeader('Content-Type', ctype);
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      return fs.createReadStream(diskCustomCover).pipe(res);
+    }
+
+    // Se o projeto tiver capa manual e o vídeo não tiver capa específica
+    if (targetProject && targetProject.coverUrl && targetProject.coverUrl.startsWith('/api/covers/')) {
+      const safeName = path.basename(targetProject.coverUrl);
+      const filePath = path.join(COVERS_DIR, safeName);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+        const ext = path.extname(safeName).toLowerCase();
+        const ctype = ext === '.png' ? 'image/png' : (ext === '.webp' ? 'image/webp' : 'image/jpeg');
+        res.setHeader('Content-Type', ctype);
+        res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+        return fs.createReadStream(filePath).pipe(res);
+      }
+    }
+
+    // REGRA 2: Capa automática padrão do vídeo (thumbnail gerada automaticamente pelo Google Drive / plataforma)
+    if (targetDriveId) {
+      // 2.1 Verifica cache em disco (s1024, s600)
+      const cacheBase = path.join(PREVIEW_CACHE_DIR, `${targetDriveId}_s1024`);
+      const cacheJpg = `${cacheBase}.jpg`;
+      const cachePng = `${cacheBase}.png`;
+      if (fs.existsSync(cacheJpg) && fs.statSync(cacheJpg).size > 0) {
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+        return fs.createReadStream(cacheJpg).pipe(res);
+      }
+      if (fs.existsSync(cachePng) && fs.statSync(cachePng).size > 0) {
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+        return fs.createReadStream(cachePng).pipe(res);
+      }
+      const cache600Jpg = path.join(PREVIEW_CACHE_DIR, `${targetDriveId}_s600.jpg`);
+      if (fs.existsSync(cache600Jpg) && fs.statSync(cache600Jpg).size > 0) {
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+        return fs.createReadStream(cache600Jpg).pipe(res);
+      }
+
+      // 2.2 Busca miniatura oficial da API do Google Drive
+      if (!targetUserDb) {
+        targetUserDb = storage.getUserDb('novelfilmes@gmail.com');
+      }
+      const token = await google.getDriveAccessToken(() => targetUserDb);
+      const metaUrl = `https://www.googleapis.com/drive/v3/files/${targetDriveId}?supportsAllDrives=true&fields=id,name,mimeType,hasThumbnail,thumbnailLink`;
+      const meta = await new Promise((resolve) => {
+        https.get(metaUrl, { headers: { Authorization: `Bearer ${token}` } }, (mres) => {
+          let b = '';
+          mres.on('data', c => b += c);
+          mres.on('end', () => {
+            try { resolve(JSON.parse(b)); } catch (e) { resolve(null); }
+          });
+        }).on('error', () => resolve(null));
+      });
+
+      if (meta && meta.hasThumbnail && meta.thumbnailLink) {
+        const thumbUrl = meta.thumbnailLink.replace(/=s\d+$/, '=s1024');
+        return https.get(thumbUrl, { headers: { Authorization: `Bearer ${token}` } }, (tres) => {
+          if (tres.statusCode === 200) {
+            const ctype = tres.headers['content-type'] || 'image/jpeg';
+            const ext = ctype.includes('png') ? '.png' : '.jpg';
+            const targetCachePath = `${cacheBase}${ext}`;
+            const tempPath = `${targetCachePath}.tmp.${Date.now()}`;
+            const writeStream = fs.createWriteStream(tempPath);
+
+            res.setHeader('Content-Type', ctype);
+            res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+
+            tres.on('data', chunk => {
+              writeStream.write(chunk);
+              res.write(chunk);
+            });
+            tres.on('end', () => {
+              writeStream.end(() => {
+                try { fs.renameSync(tempPath, targetCachePath); } catch (e) {}
+              });
+              res.end();
+            });
+            tres.on('error', () => {
+              writeStream.destroy();
+              try { fs.unlinkSync(tempPath); } catch (e) {}
+              if (!res.headersSent) sendDefaultOgIcon(res);
+              else res.destroy();
+            });
+            return;
+          }
+
+          // Fallback para thumbnailLink original caso =s1024 retorne status diferente de 200
+          return https.get(meta.thumbnailLink, { headers: { Authorization: `Bearer ${token}` } }, (t2res) => {
+            if (t2res.statusCode === 200) {
+              res.setHeader('Content-Type', t2res.headers['content-type'] || 'image/jpeg');
+              res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+              return t2res.pipe(res);
+            }
+            sendDefaultOgIcon(res);
+          }).on('error', () => sendDefaultOgIcon(res));
+        }).on('error', () => sendDefaultOgIcon(res));
+      }
+    }
+
+    // Fallback: Ícone padrão oficial Giffú Cloud
+    return sendDefaultOgIcon(res);
+  } catch (err) {
+    console.error('Erro na rota /api/og-image:', err.message);
+    sendDefaultOgIcon(res);
+  }
 });
 
 // 3.2 Category Management API (Personalizadas por usuário)
@@ -2384,12 +2672,8 @@ app.get('/api/projects/:id/download-zip', handleDownloadZip);
 app.post('/api/projects/:id/download-zip', handleDownloadZip);
 
 // 14. High Quality Secure Video Stream with HTTP 206 Partial Content & Alpha WebM VP9 support
-const APP_DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const ALPHA_CACHE_DIR = path.join(APP_DATA_DIR, 'alpha_cache');
 try { fs.mkdirSync(ALPHA_CACHE_DIR, { recursive: true }); } catch (e) {}
-
-const PREVIEW_CACHE_DIR = path.join(APP_DATA_DIR, 'preview_cache');
-try { fs.mkdirSync(PREVIEW_CACHE_DIR, { recursive: true }); } catch (e) {}
 
 const WEB_VIDEO_CACHE_DIR = path.join(APP_DATA_DIR, 'web_cache');
 try { fs.mkdirSync(WEB_VIDEO_CACHE_DIR, { recursive: true }); } catch (e) {}
@@ -3436,7 +3720,17 @@ app.post('/api/settings', requireAuthor, (req, res) => {
   res.json(userDb.settings);
 });
 
-function sendHtmlWithTitle(res, pageTitle, hideBrand = true, authorName = 'Giffú', authorColor = '#FF5400') {
+function sendHtmlWithTitle(reqOrRes, resOrTitle, pageTitle, hideBrand = true, authorName = 'Giffú', authorColor = '#FF5400', ogImageUrl = null) {
+  let req, res;
+  if (reqOrRes && reqOrRes.get && reqOrRes.headers) {
+    req = reqOrRes;
+    res = resOrTitle;
+  } else {
+    req = null;
+    res = reqOrRes;
+    pageTitle = resOrTitle;
+  }
+
   try {
     const htmlPath = path.join(__dirname, 'public', 'index.html');
     let html = fs.readFileSync(htmlPath, 'utf-8');
@@ -3447,6 +3741,19 @@ function sendHtmlWithTitle(res, pageTitle, hideBrand = true, authorName = 'Giff�
     html = html.replace(/<title>.*?<\/title>/i, `<title>${safeTitle}</title>`);
     html = html.replace(/<meta property="og:title" content=".*?">/i, `<meta property="og:title" content="${safeTitle}">`);
     html = html.replace(/<meta name="twitter:title" content=".*?">/i, `<meta name="twitter:title" content="${safeTitle}">`);
+
+    const siteName = hideBrand ? 'Cloud' : `${authorName} Cloud`;
+    html = html.replace(/<meta property="og:site_name" content=".*?">/i, `<meta property="og:site_name" content="${siteName}">`);
+
+    // Injeta imagem absoluta para WhatsApp, Telegram e redes sociais
+    const origin = getRequestOrigin(req, null);
+    const finalOgImageUrl = ogImageUrl || `${origin}/assets/icon-512.png`;
+    const imageType = finalOgImageUrl.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+    html = html.replace(/<meta property="og:image" content=".*?">/i, `<meta property="og:image" content="${finalOgImageUrl}">`);
+    html = html.replace(/<meta property="og:image:secure_url" content=".*?">/i, `<meta property="og:image:secure_url" content="${finalOgImageUrl}">`);
+    html = html.replace(/<meta property="og:image:type" content=".*?">/i, `<meta property="og:image:type" content="${imageType}">`);
+    html = html.replace(/<meta name="twitter:image" content=".*?">/i, `<meta name="twitter:image" content="${finalOgImageUrl}">`);
+    html = html.replace(/<meta name="twitter:card" content=".*?">/i, `<meta name="twitter:card" content="summary_large_image">`);
 
     // Injeta estilo CSS e variável com a cor padrão da conta de autor (evita flicker na abertura do link de cliente)
     let hex = (authorColor && typeof authorColor === 'string' && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(authorColor.trim()))
@@ -3491,20 +3798,27 @@ app.get('/entrega/:slug', (req, res) => {
     const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
     let hideBrand = project ? (project.hideBrandName !== false) : true;
     let title = project.name || (hideBrand ? 'Cloud' : `${authorName} Cloud`);
+    let ogImageUrl = null;
     if (type === 'file' && videoId) {
       const vid = (project.videos || []).find(v => v.id === videoId || v.driveFileId === videoId || v.shortCode === codeOrSlug);
       if (vid && vid.hideBrandName !== undefined) {
         hideBrand = vid.hideBrandName !== false;
       }
-      if (vid) title = vid.title || project.name;
+      if (vid) {
+        title = vid.title || project.name;
+        ogImageUrl = getOgImageUrl(req, userDb, { code: codeOrSlug, drive: vid.driveFileId, video: vid.id });
+      }
     } else if (type === 'folder' && folderId) {
       const f = (project.folders || []).find(fol => fol.id === folderId || fol.shortCode === codeOrSlug);
       if (f && f.hideBrandName !== undefined) {
         hideBrand = f.hideBrandName !== false;
       }
       if (f) title = f.name || project.name;
+      ogImageUrl = getOgImageUrl(req, userDb, { code: codeOrSlug });
+    } else {
+      ogImageUrl = getOgImageUrl(req, userDb, { code: codeOrSlug, proj: project.slug || project.id });
     }
-    return sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
+    return sendHtmlWithTitle(req, res, title, hideBrand, authorName, authorColor, ogImageUrl);
   }
 
   const found = storage.findProjectBySlug(codeOrSlug);
@@ -3515,7 +3829,8 @@ app.get('/entrega/:slug', (req, res) => {
   const hideBrand = proj ? (proj.hideBrandName !== false) : true;
   const defaultTitle = hideBrand ? 'Cloud' : `${authorName} Cloud`;
   const title = proj ? proj.name : defaultTitle;
-  sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
+  const ogImageUrl = proj ? getOgImageUrl(req, userDb, { proj: proj.slug || proj.id }) : null;
+  sendHtmlWithTitle(req, res, title, hideBrand, authorName, authorColor, ogImageUrl);
 });
 
 // Rota para shortlinks diretos ou slugs (ex: /59j640 ou /39ak804 ou /j3j643508j)
@@ -3535,21 +3850,28 @@ app.get('/:code', (req, res, next) => {
     const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
     let hideBrand = project ? (project.hideBrandName !== false) : true;
     let title = project.name || (hideBrand ? 'Cloud' : `${authorName} Cloud`);
+    let ogImageUrl = null;
 
     if (type === 'file' && videoId) {
       const vid = (project.videos || []).find(v => v.id === videoId || v.driveFileId === videoId || v.shortCode === code);
       if (vid && vid.hideBrandName !== undefined) {
         hideBrand = vid.hideBrandName !== false;
       }
-      if (vid) title = vid.title || project.name;
+      if (vid) {
+        title = vid.title || project.name;
+        ogImageUrl = getOgImageUrl(req, userDb, { code: rawCode, drive: vid.driveFileId, video: vid.id });
+      }
     } else if (type === 'folder' && folderId) {
       const f = (project.folders || []).find(fol => fol.id === folderId || fol.shortCode === code);
       if (f && f.hideBrandName !== undefined) {
         hideBrand = f.hideBrandName !== false;
       }
       if (f) title = f.name || project.name;
+      ogImageUrl = getOgImageUrl(req, userDb, { code: rawCode });
+    } else {
+      ogImageUrl = getOgImageUrl(req, userDb, { code: rawCode, proj: project.slug || project.id });
     }
-    return sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
+    return sendHtmlWithTitle(req, res, title, hideBrand, authorName, authorColor, ogImageUrl);
   }
   next();
 });
@@ -3567,7 +3889,10 @@ app.get('/entrega/:slug/:videoId', (req, res) => {
   }
   const defaultTitle = hideBrand ? 'Cloud' : `${authorName} Cloud`;
   const title = video ? video.title : (proj ? proj.name : defaultTitle);
-  sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
+  const ogImageUrl = video
+    ? getOgImageUrl(req, userDb, { drive: video.driveFileId, video: video.id, proj: proj ? (proj.slug || proj.id) : '' })
+    : (proj ? getOgImageUrl(req, userDb, { proj: proj.slug || proj.id }) : null);
+  sendHtmlWithTitle(req, res, title, hideBrand, authorName, authorColor, ogImageUrl);
 });
 
 app.get('/:year/:slug', (req, res, next) => {
@@ -3580,7 +3905,8 @@ app.get('/:year/:slug', (req, res, next) => {
     const hideBrand = proj ? (proj.hideBrandName !== false) : true;
     const defaultTitle = hideBrand ? 'Cloud' : `${authorName} Cloud`;
     const title = proj ? proj.name : defaultTitle;
-    return sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
+    const ogImageUrl = proj ? getOgImageUrl(req, userDb, { proj: proj.slug || proj.id }) : null;
+    return sendHtmlWithTitle(req, res, title, hideBrand, authorName, authorColor, ogImageUrl);
   }
   next();
 });
@@ -3599,7 +3925,10 @@ app.get('/:year/:slug/:videoId', (req, res, next) => {
     }
     const defaultTitle = hideBrand ? 'Cloud' : `${authorName} Cloud`;
     const title = video ? video.title : (proj ? proj.name : defaultTitle);
-    return sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
+    const ogImageUrl = video
+      ? getOgImageUrl(req, userDb, { drive: video.driveFileId, video: video.id, proj: proj ? (proj.slug || proj.id) : '' })
+      : (proj ? getOgImageUrl(req, userDb, { proj: proj.slug || proj.id }) : null);
+    return sendHtmlWithTitle(req, res, title, hideBrand, authorName, authorColor, ogImageUrl);
   }
   next();
 });
@@ -3617,7 +3946,7 @@ app.get('/author', (req, res) => {
     const userDb = storage.getUserDb(req.user.id);
     const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
     const authorName = (userDb && userDb.settings && userDb.settings.authorName) || (userDb && userDb.user && userDb.user.name) || 'Giffú';
-    return sendHtmlWithTitle(res, `${authorName} Cloud`, false, authorName, authorColor);
+    return sendHtmlWithTitle(req, res, `${authorName} Cloud`, false, authorName, authorColor);
   }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -3627,7 +3956,7 @@ app.get('/', (req, res) => {
     const userDb = storage.getUserDb(req.user.id);
     const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
     const authorName = (userDb && userDb.settings && userDb.settings.authorName) || (userDb && userDb.user && userDb.user.name) || 'Giffú';
-    return sendHtmlWithTitle(res, `${authorName} Cloud`, false, authorName, authorColor);
+    return sendHtmlWithTitle(req, res, `${authorName} Cloud`, false, authorName, authorColor);
   }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });

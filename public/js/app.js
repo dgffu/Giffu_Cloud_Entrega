@@ -1660,191 +1660,10 @@ class EntregaApp {
     return { isMobile, isIOS, isIPhone, isIPad, isAndroid, isChromeIOS, isSafariIOS, isStandalone };
   }
 
-  setupPwaInstallSupport() {
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      window._deferredPwaPrompt = e;
-      this.deferredPwaPrompt = e;
-    });
-
-    const btnPromptNo = document.getElementById('btnWebappPromptNo');
-    const btnPromptYes = document.getElementById('btnWebappPromptYes');
-    const promptEl = document.getElementById('mobileWebAppPrompt');
-
-    if (btnPromptNo && promptEl) {
-      btnPromptNo.addEventListener('click', () => {
-        promptEl.style.display = 'none';
-        sessionStorage.setItem('giffu_pwa_prompt_dismissed', 'true');
-      });
-    }
-
-    if (btnPromptYes) {
-      btnPromptYes.addEventListener('click', () => {
-        this.triggerWebAppInstall();
-      });
-    }
-
-    const modalIos = document.getElementById('modalIosWebappGuide');
-    const btnCloseIos = document.getElementById('btnCloseIosWebappGuide');
-    const btnDismissIos = document.getElementById('btnDismissIosWebappGuide');
-
-    if (btnCloseIos && modalIos) {
-      btnCloseIos.addEventListener('click', () => {
-        modalIos.style.display = 'none';
-      });
-    }
-    if (btnDismissIos && modalIos) {
-      btnDismissIos.addEventListener('click', () => {
-        modalIos.style.display = 'none';
-      });
-    }
-    if (modalIos) {
-      modalIos.addEventListener('click', (e) => {
-        if (e.target === modalIos) modalIos.style.display = 'none';
-      });
-    }
-  }
-
-  checkMobileWebAppPrompt(vid) {
-    if (!vid) return;
-    const platform = this.getMobilePlatform();
-    if (!platform.isMobile) return;
-    if (platform.isStandalone) return;
-
-    if (sessionStorage.getItem('giffu_pwa_prompt_dismissed') === 'true') return;
-
-    const promptEl = document.getElementById('mobileWebAppPrompt');
-    if (!promptEl) return;
-
-    const isInstalled = localStorage.getItem('giffu_pwa_installed') === 'true';
-    const titleEl = promptEl.querySelector('.mobile-webapp-title');
-    const descEl = promptEl.querySelector('.mobile-webapp-desc');
-    const btnYes = promptEl.querySelector('#btnWebappPromptYes');
-    const btnNo = promptEl.querySelector('#btnWebappPromptNo');
-
-    if (isInstalled) {
-      if (titleEl) titleEl.textContent = 'Assistir no Web App Giffú Cloud';
-      if (descEl) descEl.textContent = 'Toque em Abrir para tela cheia sem a barra do navegador';
-      if (btnYes) btnYes.textContent = 'Abrir';
-      if (btnNo) btnNo.textContent = 'Navegador';
-    } else {
-      if (titleEl) titleEl.textContent = 'Abrir no Web App';
-      if (descEl) descEl.textContent = 'Adicione à tela inicial para tela cheia sem barras';
-      if (btnYes) btnYes.textContent = 'Sim';
-      if (btnNo) btnNo.textContent = 'Não';
-    }
-
-    promptEl.style.display = 'block';
-  }
-
-  async triggerWebAppInstall() {
-    const currentUrl = window.location.href;
-    const isAlreadyInstalled = localStorage.getItem('giffu_pwa_installed') === 'true';
-    try {
-      localStorage.setItem('giffu_pwa_target_url', currentUrl);
-      localStorage.setItem('giffu_pwa_installed', 'true');
-    } catch (e) {}
-
-    const promptEl = document.getElementById('mobileWebAppPrompt');
-    if (promptEl) promptEl.style.display = 'none';
-
-    const platform = this.getMobilePlatform();
-
-    // Se o usuário já instalou o atalho anteriormente
-    if (isAlreadyInstalled) {
-      if (window.showToast) {
-        window.showToast('Vídeo salvo! Abra o atalho "Giffú Cloud" na tela de início.');
-      }
-      return;
-    }
-
-    // 1. Android / Chromium
-    if (platform.isAndroid) {
-      const promptEvent = window._deferredPwaPrompt || this.deferredPwaPrompt;
-      if (promptEvent) {
-        try {
-          promptEvent.prompt();
-          const choice = await promptEvent.userChoice;
-          if (choice && choice.outcome === 'accepted') {
-            if (window.showToast) window.showToast('Giffú Cloud adicionado à tela inicial!');
-          }
-        } catch (err) {
-          console.warn('Erro ao acionar prompt PWA:', err);
-        } finally {
-          window._deferredPwaPrompt = null;
-          this.deferredPwaPrompt = null;
-        }
-        return;
-      }
-      if (window.showToast) {
-        window.showToast('Toque no menu (⋮) do Chrome e selecione "Adicionar à tela inicial" ou "Instalar app"');
-      }
-      return;
-    }
-
-    // 2. iOS / iPadOS
-    if (platform.isIOS) {
-      this.showIosInstallGuide(platform);
-      return;
-    }
-
-    // Outros sistemas
-    const promptEvent = window._deferredPwaPrompt || this.deferredPwaPrompt;
-    if (promptEvent) {
-      try {
-        promptEvent.prompt();
-      } catch (e) {}
-    } else if (window.showToast) {
-      window.showToast('Adicione à tela inicial pelo menu do seu navegador');
-    }
-  }
-
-  showIosInstallGuide(platform) {
-    const modalIos = document.getElementById('modalIosWebappGuide');
-    if (!modalIos) return;
-
-    const titleEl = modalIos.querySelector('.modal-title');
-    const descEl = modalIos.querySelector('.modal-body p');
-    const step1El = modalIos.querySelector('.webapp-guide-steps .webapp-guide-step:nth-child(1) .webapp-step-content');
-
-    if (platform.isIPad) {
-      if (titleEl) titleEl.textContent = 'Adicionar ao iPad';
-      if (descEl) descEl.textContent = 'Instale o Web App no seu iPad para assistir vídeos com tela cheia real e sem a barra do navegador.';
-      if (step1El) {
-        step1El.innerHTML = `Toque no botão <strong>Compartilhar</strong>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF5400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin: 0 4px;">
-            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-            <polyline points="16 6 12 2 8 6"></polyline>
-            <line x1="12" y1="2" x2="12" y2="15"></line>
-          </svg>
-          na <strong>barra superior</strong> do Safari.`;
-      }
-      modalIos.classList.remove('is-iphone-bottom');
-      modalIos.classList.add('is-ipad-top');
-    } else {
-      if (titleEl) titleEl.textContent = 'Adicionar ao iPhone';
-      if (descEl) descEl.textContent = 'Instale o Web App no seu iPhone para assistir vídeos com tela cheia real e sem a barra do navegador.';
-      if (step1El) {
-        step1El.innerHTML = `Toque no botão <strong>Compartilhar</strong>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF5400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin: 0 4px;">
-            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-            <polyline points="16 6 12 2 8 6"></polyline>
-            <line x1="12" y1="2" x2="12" y2="15"></line>
-          </svg>
-          na <strong>barra inferior</strong> do Safari.`;
-      }
-      modalIos.classList.add('is-iphone-bottom');
-      modalIos.classList.remove('is-ipad-top');
-    }
-
-    modalIos.style.display = 'flex';
-  }
-
   async init() {
     if (this.handlePwaStartup()) return;
     this.setupTheme();
     this.setupMobileOrientationGuard();
-    this.setupPwaInstallSupport();
     await window.Auth.init();
     this.authorSession = this.loadAuthorSession();
     await this.fetchData();
@@ -2907,8 +2726,6 @@ class EntregaApp {
       this.playerInstance = null;
     }
     this.cleanupPhotoFullscreen();
-    const existingPrompt = document.getElementById('mobileWebAppPrompt');
-    if (existingPrompt) existingPrompt.style.display = 'none';
     this.selectedProject = null;
     this.selectedVideo = null;
     this.currentFolderId = null;
@@ -2936,8 +2753,6 @@ class EntregaApp {
       this.playerInstance = null;
     }
     this.cleanupPhotoFullscreen();
-    const existingPrompt = document.getElementById('mobileWebAppPrompt');
-    if (existingPrompt) existingPrompt.style.display = 'none';
     // Ao abrir um diretório a partir da barra lateral ou lobby, respeita a preferência configurada do projeto
     this._isColumnsNavActive = false;
     this.selectedProject = proj;
@@ -4100,8 +3915,6 @@ class EntregaApp {
       this.playerInstance = null;
     }
     this.cleanupPhotoFullscreen();
-    const existingPrompt = document.getElementById('mobileWebAppPrompt');
-    if (existingPrompt) existingPrompt.style.display = 'none';
 
     const gData = this.getGalleryData() || { proj: this.selectedProject, folders: (this.selectedProject?.folders || []) };
 
@@ -5072,8 +4885,6 @@ class EntregaApp {
       this.playerInstance = null;
     }
     this.cleanupPhotoFullscreen();
-    const existingPrompt = document.getElementById('mobileWebAppPrompt');
-    if (existingPrompt) existingPrompt.style.display = 'none';
 
     // Empty state when no projects exist
     if (!this.selectedProject || !this.data.projects || this.data.projects.length === 0) {
@@ -8371,8 +8182,6 @@ class EntregaApp {
       this.playerInstance = null;
     }
     this.cleanupPhotoFullscreen();
-    const existingPrompt = document.getElementById('mobileWebAppPrompt');
-    if (existingPrompt) existingPrompt.style.display = 'none';
 
     if (!this.selectedProject || !this.selectedVideo) {
       this.currentView = this.isClientMode ? 'client_gallery' : 'author';
@@ -8898,8 +8707,6 @@ class EntregaApp {
           await this.resetVideoCoverFrame(proj.id, vid.id);
         }
       });
-      // Sugerir "Abrir no Web App" no mobile quando abrir um vídeo
-      this.checkMobileWebAppPrompt(vid);
     }
 
     // Initialize Comments Controller

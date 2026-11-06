@@ -27,17 +27,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="manifest" href="/manifest.json">
   <script>
-    // Early capture of PWA installation prompt for Android / Chromium
-    window._deferredPwaPrompt = null;
-    window.addEventListener('beforeinstallprompt', function(e) {
-      e.preventDefault();
-      window._deferredPwaPrompt = e;
-    });
-    // Immediate Service Worker registration
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(err) {
-        console.warn('SW register warn:', err);
-      });
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(err) {});
     }
   </script>
   <link rel="stylesheet" href="/css/style.css">
@@ -885,88 +876,6 @@
     </div>
   </aside>
 
-  <!-- Mobile Web App Prompt (Bottom Floating Sheet / Toast) -->
-  <aside id="mobileWebAppPrompt" class="mobile-webapp-prompt" aria-label="Abrir no Web App" style="display: none;">
-    <div class="mobile-webapp-card">
-      <div class="mobile-webapp-header">
-        <div class="mobile-webapp-icon-wrap">
-          <svg class="mobile-webapp-icon" viewBox="0 0 1585.74 1030.98" width="28" height="20" fill="currentColor" aria-hidden="true">
-            <path fill="#FF5400" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/>
-            <path fill="#FF5400" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/>
-            <g><path fill="#FF5400" d="M331.2,1024.8c-26.64-5.22-52.18-13.64-76.22-24.84C106.1,944.84,0,801.6,0,633.58c0-195.39,143.43-357.25,330.76-386.04-22.01,27.86-34.3,62.6-34.3,99.73v577.31c0,29.93,8.07,58.96,23.33,83.94,3.46,5.66,7.27,11.1,11.41,16.28Z"/><path fill="#FF5400" d="M1585.74,693.33c0,122.09-69.26,228.03-170.62,280.62-53.46,36.06-117.43,57.03-186.14,57.03h-636.4l444.28-272.6c49.44-30.34,78.18-83.07,76.87-141.06-1.31-58-32.4-109.38-83.16-137.46l-494.84-273.69c-12.02-6.65-24.56-11.66-37.37-15.05C589.85,74.73,731.91,0,891.42,0c240.88,0,441.95,170.45,489.19,397.33,119.84,44.92,205.13,160.48,205.13,296Z"/></g>
-            <g><path fill="#FF5400" d="M955.63,698.49l-434.14,266.38c-.14.09-.28.17-.42.25-27.71,16.8-61.1,17.39-89.41,1.54-28.45-15.92-45.44-44.9-45.44-77.5v-506.49c0-31.77,16.34-60.37,43.7-76.51,10.63-6.26,22.1-10.17,33.79-11.69,4.21.59,8.39,1.25,12.55,1.98.52-.89,1.04-1.79,1.57-2.68,13.79.45,27.53,4.17,40.2,11.18l13.91,7.69,420.23,232.42c27.96,15.46,45.09,43.77,45.81,75.71.72,31.94-15.11,60.99-42.34,77.71Z"/><path fill="#FF5400" d="M477.83,293.78c-.53.89-1.05,1.78-1.57,2.68-4.16-.74-8.33-1.4-12.55-1.98,3.75-.49,7.53-.74,11.3-.74.94,0,1.88.02,2.82.04Z"/></g>
-          </svg>
-        </div>
-        <div class="mobile-webapp-info">
-          <span class="mobile-webapp-title">Abrir no Web App</span>
-          <span class="mobile-webapp-desc">Adicione à tela inicial para tela cheia sem barras</span>
-        </div>
-      </div>
-      <div class="mobile-webapp-actions">
-        <button type="button" class="btn-webapp-no" id="btnWebappPromptNo">Não</button>
-        <button type="button" class="btn-webapp-yes" id="btnWebappPromptYes">Sim</button>
-      </div>
-    </div>
-  </aside>
-
-  <!-- Modal Instruções de Instalação no iOS Safari -->
-  <div class="modal-backdrop" id="modalIosWebappGuide" style="display: none;">
-    <div class="modal-card modal-webapp-guide-card">
-      <div class="modal-header">
-        <div class="webapp-guide-badge">
-          <svg viewBox="0 0 1585.74 1030.98" width="24" height="16" fill="currentColor" aria-hidden="true">
-            <path fill="#FF5400" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/>
-            <path fill="#FF5400" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/>
-            <g><path fill="#FF5400" d="M331.2,1024.8c-26.64-5.22-52.18-13.64-76.22-24.84C106.1,944.84,0,801.6,0,633.58c0-195.39,143.43-357.25,330.76-386.04-22.01,27.86-34.3,62.6-34.3,99.73v577.31c0,29.93,8.07,58.96,23.33,83.94,3.46,5.66,7.27,11.1,11.41,16.28Z"/><path fill="#FF5400" d="M1585.74,693.33c0,122.09-69.26,228.03-170.62,280.62-53.46,36.06-117.43,57.03-186.14,57.03h-636.4l444.28-272.6c49.44-30.34,78.18-83.07,76.87-141.06-1.31-58-32.4-109.38-83.16-137.46l-494.84-273.69c-12.02-6.65-24.56-11.66-37.37-15.05C589.85,74.73,731.91,0,891.42,0c240.88,0,441.95,170.45,489.19,397.33,119.84,44.92,205.13,160.48,205.13,296Z"/></g>
-            <g><path fill="#FF5400" d="M955.63,698.49l-434.14,266.38c-.14.09-.28.17-.42.25-27.71,16.8-61.1,17.39-89.41,1.54-28.45-15.92-45.44-44.9-45.44-77.5v-506.49c0-31.77,16.34-60.37,43.7-76.51,10.63-6.26,22.1-10.17,33.79-11.69,4.21.59,8.39,1.25,12.55,1.98.52-.89,1.04-1.79,1.57-2.68,13.79.45,27.53,4.17,40.2,11.18l13.91,7.69,420.23,232.42c27.96,15.46,45.09,43.77,45.81,75.71.72,31.94-15.11,60.99-42.34,77.71Z"/><path fill="#FF5400" d="M477.83,293.78c-.53.89-1.05,1.78-1.57,2.68-4.16-.74-8.33-1.4-12.55-1.98,3.75-.49,7.53-.74,11.3-.74.94,0,1.88.02,2.82.04Z"/></g>
-          </svg>
-          <span style="font-weight: 700; color: #fff; margin-left: 6px;"><span class="brand-author-name">Giffú</span><span class="app-subtitle" style="margin-left: 4px; font-weight: 400; opacity: 0.95;">Cloud</span></span>
-        </div>
-        <button class="modal-close-btn" type="button" id="btnCloseIosWebappGuide" aria-label="Fechar">&times;</button>
-      </div>
-      <div class="modal-body">
-        <h3 class="modal-title" style="margin-bottom: 8px;">Adicionar à Tela de Início</h3>
-        <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">
-          Instale o Web App no seu iPhone para assistir vídeos com tela cheia real e sem a barra do navegador.
-        </p>
-        <div class="webapp-guide-steps">
-          <div class="webapp-guide-step">
-            <div class="webapp-step-num">1</div>
-            <div class="webapp-step-content">
-              Toque no botão <strong>Compartilhar</strong>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF5400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin: 0 4px;">
-                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-                <polyline points="16 6 12 2 8 6"></polyline>
-                <line x1="12" y1="2" x2="12" y2="15"></line>
-              </svg>
-              na barra inferior do Safari.
-            </div>
-          </div>
-          <div class="webapp-guide-step">
-            <div class="webapp-step-num">2</div>
-            <div class="webapp-step-content">
-              Role a lista e selecione <strong>Adicionar à Tela de Início</strong>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF5400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin: 0 4px;">
-                <rect x="3" y="3" width="18" height="18" rx="4" ry="4"></rect>
-                <line x1="12" y1="8" x2="12" y2="16"></line>
-                <line x1="8" y1="12" x2="16" y2="12"></line>
-              </svg>
-            </div>
-          </div>
-          <div class="webapp-guide-step">
-            <div class="webapp-step-num">3</div>
-            <div class="webapp-step-content">
-              Toque em <strong>Adicionar</strong> no canto superior direito.
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer" style="padding-top: 10px;">
-        <button type="button" class="btn-primary" id="btnDismissIosWebappGuide" style="width: 100%; border-radius: 9999px; font-weight: 700; background: #FF5400;">Entendi</button>
-      </div>
-      <div class="ios-pointer-down-arrow" id="iosPointerDownArrow" aria-hidden="true"></div>
-    </div>
-  </div>
   <!-- Context Menu for Category Colors (Right-Click) -->
   <div class="category-context-menu" id="categoryContextMenu" style="display: none;" role="menu" aria-label="Menu de Cor da Categoria">
     <div class="context-menu-header">

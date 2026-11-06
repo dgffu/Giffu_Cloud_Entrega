@@ -538,12 +538,22 @@ class CustomVideoPlayer {
     const offsetLeft = vv ? vv.offsetLeft : 0;
 
     if (this.isFullscreen()) {
-      this.container.style.setProperty('--fs-vw', `${vw}px`);
-      this.container.style.setProperty('--fs-vh', `${vh}px`);
-      this.container.style.setProperty('--fs-top', `${offsetTop}px`);
-      this.container.style.setProperty('--fs-left', `${offsetLeft}px`);
-      this.container.style.setProperty('--fs-center-x', `${offsetLeft + vw / 2}px`);
-      this.container.style.setProperty('--fs-center-y', `${offsetTop + vh / 2}px`);
+      if (this.isMobileDevice()) {
+        this.container.style.setProperty('--fs-vw', `${vw}px`);
+        this.container.style.setProperty('--fs-vh', `${vh}px`);
+        this.container.style.setProperty('--fs-top', `${offsetTop}px`);
+        this.container.style.setProperty('--fs-left', `${offsetLeft}px`);
+        this.container.style.setProperty('--fs-center-x', `${offsetLeft + vw / 2}px`);
+        this.container.style.setProperty('--fs-center-y', `${offsetTop + vh / 2}px`);
+      } else {
+        // Desktop PC: remove restrições de viewport inline para garantir 100vw x 100vh nativo
+        this.container.style.removeProperty('--fs-vw');
+        this.container.style.removeProperty('--fs-vh');
+        this.container.style.removeProperty('--fs-top');
+        this.container.style.removeProperty('--fs-left');
+        this.container.style.removeProperty('--fs-center-x');
+        this.container.style.removeProperty('--fs-center-y');
+      }
     } else {
       this.container.style.removeProperty('--fs-vw');
       this.container.style.removeProperty('--fs-vh');
@@ -563,8 +573,17 @@ class CustomVideoPlayer {
       return;
     }
 
-    const { vw, vh } = this.syncFullscreenViewport();
     const isMobile = this.isMobileDevice();
+    const { vw, vh } = this.syncFullscreenViewport();
+
+    if (!isMobile) {
+      // DESKTOP PC / MAC WEB:
+      // Monitores são fixos: nunca rotaciona via CSS nem bloqueia orientação de sistema
+      this.container.classList.remove('fullscreen-rotated-landscape');
+      return;
+    }
+
+    // DISPOSITIVOS MÓVEIS (MOBILE ONLY):
     const isVertical = this.isVerticalVideo();
     const isDevicePortrait = vh > vw;
 
@@ -586,7 +605,7 @@ class CustomVideoPlayer {
           screen.orientation.lock('landscape').catch(() => {});
         });
       }
-      if (isMobile && isDevicePortrait) {
+      if (isDevicePortrait) {
         this.container.classList.add('fullscreen-rotated-landscape');
       } else {
         this.container.classList.remove('fullscreen-rotated-landscape');
@@ -595,21 +614,28 @@ class CustomVideoPlayer {
   }
 
   enterFullscreen(direction = 'landscape-primary') {
+    const isMobile = this.isMobileDevice();
     const isVertical = this.isVerticalVideo();
     const effectiveDir = isVertical ? 'portrait-primary' : direction;
 
     if (this.isFullscreen()) {
-      this.applyOrientationLock(effectiveDir);
+      if (isMobile) {
+        this.applyOrientationLock(effectiveDir);
+      }
       this.updateFullscreenOrientation();
       return;
     }
 
     const onEnterSuccess = () => {
+      this.container.classList.toggle('is-desktop-player', !isMobile);
+      this.container.classList.toggle('is-mobile-player', isMobile);
       this.container.classList.add('is-fullscreen');
       document.body.classList.add('video-fullscreen-active');
       document.documentElement.classList.add('video-fullscreen-active');
       this.setFullscreenThemeColor(true);
-      this.applyOrientationLock(effectiveDir);
+      if (isMobile) {
+        this.applyOrientationLock(effectiveDir);
+      }
       this.updateFullscreenOrientation();
       this.updateFullscreenIcon(true);
     };
@@ -662,18 +688,20 @@ class CustomVideoPlayer {
       try { this.video.webkitExitFullscreen(); } catch (e) {}
     }
 
-    this.container.classList.remove('is-fullscreen', 'fullscreen-rotated-landscape');
+    this.container.classList.remove('is-fullscreen', 'fullscreen-rotated-landscape', 'is-desktop-player', 'is-mobile-player');
     document.body.classList.remove('video-fullscreen-active');
     document.documentElement.classList.remove('video-fullscreen-active');
     this.setFullscreenThemeColor(false);
     this.syncFullscreenViewport();
     this.updateFullscreenIcon(false);
 
-    if (screen.orientation && screen.orientation.unlock) {
-      try { screen.orientation.unlock(); } catch (e) {}
-    }
-    if (screen.orientation && screen.orientation.lock) {
-      screen.orientation.lock('portrait').catch(() => {});
+    if (this.isMobileDevice()) {
+      if (screen.orientation && screen.orientation.unlock) {
+        try { screen.orientation.unlock(); } catch (e) {}
+      }
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('portrait').catch(() => {});
+      }
     }
   }
 
@@ -694,6 +722,7 @@ class CustomVideoPlayer {
   }
 
   applyOrientationLock(direction) {
+    if (!this.isMobileDevice()) return; // PC desktop não altera orientação de sistema
     if (screen.orientation && screen.orientation.lock) {
       const isVertical = this.isVerticalVideo();
       let targetLock;
@@ -733,6 +762,13 @@ class CustomVideoPlayer {
       if (this.isFullscreen()) {
         this.syncFullscreenViewport();
       }
+
+      // Auto-rotação e detecção de giro físico é EXCLUSIVA para mobile!
+      // No PC Desktop, redimensionar a janela do navegador NUNCA deve forçar fullscreen.
+      if (!this.isMobileDevice()) {
+        return;
+      }
+
       // Settle time for viewport on mobile rotation
       setTimeout(() => {
         if (!this.video) return;
@@ -784,13 +820,16 @@ class CustomVideoPlayer {
 
       if (isNative) {
         this._hadNativeFullscreen = true;
+        const isMobile = this.isMobileDevice();
+        this.container.classList.toggle('is-desktop-player', !isMobile);
+        this.container.classList.toggle('is-mobile-player', isMobile);
         this.container.classList.add('is-fullscreen');
         document.body.classList.add('video-fullscreen-active');
         document.documentElement.classList.add('video-fullscreen-active');
         this.setFullscreenThemeColor(true);
         this.updateFullscreenOrientation();
         this.updateFullscreenIcon(true);
-      } else if (this._hadNativeFullscreen) {
+      } else if (this._hadNativeFullscreen || this.container.classList.contains('is-fullscreen')) {
         this._hadNativeFullscreen = false;
         this.exitFullscreen();
       }
@@ -813,7 +852,7 @@ class CustomVideoPlayer {
       this.setFullscreenThemeColor(false);
       this.syncFullscreenViewport();
       this.updateFullscreenIcon(false);
-      if (screen.orientation && screen.orientation.lock) {
+      if (this.isMobileDevice() && screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('portrait').catch(() => {});
       }
     });

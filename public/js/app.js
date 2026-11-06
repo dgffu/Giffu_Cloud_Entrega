@@ -2455,11 +2455,11 @@ class EntregaApp {
     if (pwdNotice) {
       if (inheritedPwdInfo) {
         const srcLabel = inheritedPwdInfo.sourceType === 'folder'
-          ? `da pasta "${inheritedPwdInfo.sourceName}"`
-          : `do diretório "${inheritedPwdInfo.sourceName}"`;
+          ? `pela pasta "${inheritedPwdInfo.sourceName}"`
+          : `pelo diretório "${inheritedPwdInfo.sourceName}"`;
         pwdNotice.textContent = ownPwd && ownPwd !== inheritedPwdInfo.password
-          ? `🔒 Usando senha exclusiva (além da proteção herdada ${srcLabel}).`
-          : `🔒 Protegido automaticamente pela senha ${srcLabel}. Digite outra se desejar uma senha exclusiva para este arquivo.`;
+          ? `Usando senha exclusiva (além da proteção ${srcLabel}).`
+          : `Protegido automaticamente ${srcLabel}. Digite outra senha exclusiva se desejar.`;
         pwdNotice.style.display = 'block';
       } else {
         pwdNotice.textContent = '';
@@ -2523,11 +2523,11 @@ class EntregaApp {
     if (pwdNotice) {
       if (inheritedPwdInfo) {
         const srcLabel = inheritedPwdInfo.sourceType === 'folder'
-          ? `da pasta "${inheritedPwdInfo.sourceName}"`
-          : `do diretório "${inheritedPwdInfo.sourceName}"`;
+          ? `pela pasta "${inheritedPwdInfo.sourceName}"`
+          : `pelo diretório "${inheritedPwdInfo.sourceName}"`;
         pwdNotice.textContent = ownPwd && ownPwd !== inheritedPwdInfo.password
-          ? `🔒 Usando senha exclusiva (além da proteção herdada ${srcLabel}).`
-          : `🔒 Protegida automaticamente pela senha ${srcLabel}. Digite outra se desejar uma senha exclusiva para esta pasta.`;
+          ? `Usando senha exclusiva (além da proteção ${srcLabel}).`
+          : `Protegido automaticamente ${srcLabel}. Digite outra senha exclusiva se desejar.`;
         pwdNotice.style.display = 'block';
       } else {
         pwdNotice.textContent = '';

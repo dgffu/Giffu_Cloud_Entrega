@@ -2308,6 +2308,123 @@ class EntregaApp {
     return project.allowShare !== false;
   }
 
+  getInheritedPasswordInfoForFolder(folder, project) {
+    if (!project || !folder) return null;
+    const foldersMap = new Map((project.folders || []).map(f => [f.id, f]));
+    let curr = folder.parentId ? foldersMap.get(folder.parentId) : null;
+    const visited = new Set([folder.id]);
+    while (curr && !visited.has(curr.id)) {
+      visited.add(curr.id);
+      if (typeof curr.password === 'string' && curr.password.trim()) {
+        return {
+          password: curr.password.trim(),
+          sourceName: curr.name || 'Pasta',
+          sourceType: 'folder',
+          sourceId: curr.id
+        };
+      }
+      curr = curr.parentId ? foldersMap.get(curr.parentId) : null;
+    }
+    if (typeof project.password === 'string' && project.password.trim()) {
+      return {
+        password: project.password.trim(),
+        sourceName: project.name || 'Diretório',
+        sourceType: 'project',
+        sourceId: project.id
+      };
+    }
+    return null;
+  }
+
+  getInheritedPasswordInfoForVideo(item, project) {
+    if (!project || !item) return null;
+    const fId = item.driveFolderId || item.folderId;
+    if (fId) {
+      const foldersMap = new Map((project.folders || []).map(f => [f.id, f]));
+      let curr = foldersMap.get(fId);
+      const visited = new Set();
+      while (curr && !visited.has(curr.id)) {
+        visited.add(curr.id);
+        if (typeof curr.password === 'string' && curr.password.trim()) {
+          return {
+            password: curr.password.trim(),
+            sourceName: curr.name || 'Pasta',
+            sourceType: 'folder',
+            sourceId: curr.id
+          };
+        }
+        curr = curr.parentId ? foldersMap.get(curr.parentId) : null;
+      }
+    }
+    if (typeof project.password === 'string' && project.password.trim()) {
+      return {
+        password: project.password.trim(),
+        sourceName: project.name || 'Diretório',
+        sourceType: 'project',
+        sourceId: project.id
+      };
+    }
+    return null;
+  }
+
+  getEffectivePasswordForFolder(folder, project) {
+    if (!folder) return '';
+    if (typeof folder.password === 'string' && folder.password.trim()) {
+      return folder.password.trim();
+    }
+    const inherited = this.getInheritedPasswordInfoForFolder(folder, project);
+    return inherited ? inherited.password : '';
+  }
+
+  isFolderPasswordProtected(folder, project) {
+    if (!folder) return false;
+    if (folder.password === true || (typeof folder.password === 'string' && folder.password.trim())) {
+      return true;
+    }
+    if (!project) return false;
+    const foldersMap = new Map((project.folders || []).map(f => [f.id, f]));
+    let curr = folder.parentId ? foldersMap.get(folder.parentId) : null;
+    const visited = new Set([folder.id]);
+    while (curr && !visited.has(curr.id)) {
+      visited.add(curr.id);
+      if (curr.password === true || (typeof curr.password === 'string' && curr.password.trim())) {
+        return true;
+      }
+      curr = curr.parentId ? foldersMap.get(curr.parentId) : null;
+    }
+    return Boolean(project.password === true || project.hasOwnPassword || (typeof project.password === 'string' && project.password.trim()));
+  }
+
+  isVideoPasswordProtected(item, project) {
+    if (!item) return false;
+    if (item.password === true || (typeof item.password === 'string' && item.password.trim())) {
+      return true;
+    }
+    if (!project) return false;
+    const fId = item.driveFolderId || item.folderId;
+    if (fId) {
+      const fObj = (project.folders || []).find(f => f.id === fId);
+      if (fObj && this.isFolderPasswordProtected(fObj, project)) return true;
+    }
+    return Boolean(project.password === true || project.hasOwnPassword || (typeof project.password === 'string' && project.password.trim()));
+  }
+
+  isFolderLockedForClient(folder, project) {
+    if (!this.isClientMode || !folder) return false;
+    if (this.unlockedSlugs && (this.unlockedSlugs.has(folder.id) || (folder.shortCode && this.unlockedSlugs.has(folder.shortCode)))) {
+      return false;
+    }
+    return Boolean(folder.isLocked);
+  }
+
+  isVideoLockedForClient(item, project) {
+    if (!this.isClientMode || !item) return false;
+    if (this.unlockedSlugs && (this.unlockedSlugs.has(item.id) || (item.shortCode && this.unlockedSlugs.has(item.shortCode)))) {
+      return false;
+    }
+    return Boolean(item.isLocked);
+  }
+
   openEditMediaModal(vid, proj) {
     const modal = document.getElementById('modalEditMedia');
     if (!modal) return;
@@ -2319,6 +2436,35 @@ class EntregaApp {
     const titleEl = document.getElementById('editMediaTitle');
     if (titleEl) {
       titleEl.value = initialTitle;
+    }
+
+    const pwdInput = document.getElementById('editMediaPassword');
+    const pwdNotice = document.getElementById('inheritedMediaPasswordNotice');
+    const pwdLabel = document.getElementById('labelEditMediaPassword');
+    const inheritedPwdInfo = this.getInheritedPasswordInfoForVideo(vid, proj);
+    const ownPwd = (typeof vid.password === 'string') ? vid.password.trim() : '';
+    if (pwdInput) {
+      pwdInput.value = ownPwd || (inheritedPwdInfo ? inheritedPwdInfo.password : '');
+      pwdInput.placeholder = inheritedPwdInfo ? 'Protegido pela senha herdada' : 'Sem senha';
+    }
+    if (pwdLabel) {
+      pwdLabel.textContent = inheritedPwdInfo
+        ? 'Senha de Acesso (Herdada ou Exclusiva)'
+        : 'Senha de Acesso (Deixe em branco para remover)';
+    }
+    if (pwdNotice) {
+      if (inheritedPwdInfo) {
+        const srcLabel = inheritedPwdInfo.sourceType === 'folder'
+          ? `da pasta "${inheritedPwdInfo.sourceName}"`
+          : `do diretório "${inheritedPwdInfo.sourceName}"`;
+        pwdNotice.textContent = ownPwd && ownPwd !== inheritedPwdInfo.password
+          ? `🔒 Usando senha exclusiva (além da proteção herdada ${srcLabel}).`
+          : `🔒 Protegido automaticamente pela senha ${srcLabel}. Digite outra se desejar uma senha exclusiva para este arquivo.`;
+        pwdNotice.style.display = 'block';
+      } else {
+        pwdNotice.textContent = '';
+        pwdNotice.style.display = 'none';
+      }
     }
 
     const checkbox = document.getElementById('editMediaAllowComments');
@@ -2358,6 +2504,35 @@ class EntregaApp {
     const nameEl = document.getElementById('editFolderName');
     if (nameEl) {
       nameEl.value = folder.name || '';
+    }
+
+    const pwdInput = document.getElementById('editFolderPassword');
+    const pwdNotice = document.getElementById('inheritedFolderPasswordNotice');
+    const pwdLabel = document.getElementById('labelEditFolderPassword');
+    const inheritedPwdInfo = this.getInheritedPasswordInfoForFolder(folder, proj);
+    const ownPwd = (typeof folder.password === 'string') ? folder.password.trim() : '';
+    if (pwdInput) {
+      pwdInput.value = ownPwd || (inheritedPwdInfo ? inheritedPwdInfo.password : '');
+      pwdInput.placeholder = inheritedPwdInfo ? 'Protegido pela senha herdada' : 'Sem senha';
+    }
+    if (pwdLabel) {
+      pwdLabel.textContent = inheritedPwdInfo
+        ? 'Senha de Acesso (Herdada ou Exclusiva)'
+        : 'Senha de Acesso (Deixe em branco para remover)';
+    }
+    if (pwdNotice) {
+      if (inheritedPwdInfo) {
+        const srcLabel = inheritedPwdInfo.sourceType === 'folder'
+          ? `da pasta "${inheritedPwdInfo.sourceName}"`
+          : `do diretório "${inheritedPwdInfo.sourceName}"`;
+        pwdNotice.textContent = ownPwd && ownPwd !== inheritedPwdInfo.password
+          ? `🔒 Usando senha exclusiva (além da proteção herdada ${srcLabel}).`
+          : `🔒 Protegida automaticamente pela senha ${srcLabel}. Digite outra se desejar uma senha exclusiva para esta pasta.`;
+        pwdNotice.style.display = 'block';
+      } else {
+        pwdNotice.textContent = '';
+        pwdNotice.style.display = 'none';
+      }
     }
 
     const checkbox = document.getElementById('editFolderAllowComments');
@@ -2429,7 +2604,7 @@ class EntregaApp {
         category: proj.category,
         divisionId: proj.divisionId || null,
         driveLink: driveLink,
-        password: proj.password || '',
+        password: this.getEffectivePasswordForFolder(folder, proj) || proj.password || '',
         allowComments: proj.allowComments !== undefined ? proj.allowComments : true,
         allowShare: proj.allowShare !== undefined ? proj.allowShare : true,
         hideBrandName: Boolean(proj.hideBrandName),
@@ -2492,11 +2667,68 @@ class EntregaApp {
       this.renderSidebar();
     }
 
-    // If client mode and protected with password
-    const projUnlockKey = this.selectedProject ? (this.selectedProject.id || this.selectedProject.slug) : null;
-    if (this.isClientMode && this.selectedProject && this.selectedProject.password && !this.unlockedSlugs.has(projUnlockKey) && !this.unlockedSlugs.has(this.selectedProject.slug)) {
-      this.renderPasswordGate();
-      return;
+    // If client mode and protected with password (project root, subfolder, or file)
+    if (this.isClientMode && this.selectedProject) {
+      const proj = this.selectedProject;
+      const projUnlockKey = proj.id || proj.slug;
+
+      // 1. Diretório raiz (ou link direto de pasta/arquivo ainda bloqueado na origem)
+      if ((proj.isLocked || (proj.password && !proj.folders?.length && !proj.videos?.length)) && !this.unlockedSlugs.has(projUnlockKey) && !this.unlockedSlugs.has(proj.slug)) {
+        this.renderPasswordGate({
+          type: proj.lockedTargetType || (this.isIsolatedFile ? 'file' : (this.scopedFolderId ? 'folder' : 'project')),
+          proj,
+          folderId: proj.lockedFolderId || this.scopedFolderId || null,
+          videoId: proj.lockedVideoId || (this.selectedVideo ? this.selectedVideo.id : null),
+          targetName: proj.lockedTargetName || proj.name,
+          isRootGate: true,
+          canGoBack: false
+        });
+        return;
+      }
+
+      // 2. Arquivo individual selecionado que possui senha própria bloqueada
+      if (this.currentView === 'client_player' && this.selectedVideo && this.isVideoLockedForClient(this.selectedVideo, proj)) {
+        this.renderPasswordGate({
+          type: 'file',
+          proj,
+          video: this.selectedVideo,
+          videoId: this.selectedVideo.id,
+          folderId: this.currentFolderId || null,
+          targetName: this.getDisplayTitle(this.selectedVideo),
+          isRootGate: false,
+          canGoBack: !this.isIsolatedFile
+        });
+        return;
+      }
+
+      // 3. Pasta aberta que possui senha própria bloqueada (ou ancestral bloqueado)
+      if (this.currentFolderId) {
+        const folders = proj.folders || [];
+        let checkFid = this.currentFolderId;
+        let lockedFolderTarget = null;
+        const visited = new Set();
+        while (checkFid && !visited.has(checkFid)) {
+          visited.add(checkFid);
+          const fObj = folders.find(f => f.id === checkFid);
+          if (fObj && this.isFolderLockedForClient(fObj, proj)) {
+            lockedFolderTarget = fObj;
+          }
+          if (this.scopedFolderId && checkFid === this.scopedFolderId) break;
+          checkFid = fObj ? fObj.parentId : null;
+        }
+        if (lockedFolderTarget) {
+          this.renderPasswordGate({
+            type: 'folder',
+            proj,
+            folder: lockedFolderTarget,
+            folderId: lockedFolderTarget.id,
+            targetName: lockedFolderTarget.name,
+            isRootGate: false,
+            canGoBack: this.scopedFolderId !== lockedFolderTarget.id
+          });
+          return;
+        }
+      }
     }
 
     this.renderMainContent();
@@ -5761,9 +5993,11 @@ class EntregaApp {
 
     const pillClass = isPdf ? 'doc-pill pdf-pill' : (isPsd ? 'photo-pill psd-pill' : (isAi ? 'photo-pill ai-pill' : 'photo-pill'));
     const formattedSize = this.formatFileSize(item.size);
+    const isProtected = this.isVideoPasswordProtected(item, this.selectedProject);
+    const isLockedClient = this.isVideoLockedForClient(item, this.selectedProject);
 
     return `
-      <div class="video-card ${isAudio ? 'audio-card' : (isPdf ? 'file-card pdf-card' : (isImage ? 'photo-card' : (isOtherFile ? 'file-card' : '')))} ${isSelected ? 'selected-for-batch' : ''} ${isHighlighted ? 'highlighted-search-item' : ''}" data-video-id="${item.id}" data-type="${itemType}">
+      <div class="video-card ${isAudio ? 'audio-card' : (isPdf ? 'file-card pdf-card' : (isImage ? 'photo-card' : (isOtherFile ? 'file-card' : '')))} ${isSelected ? 'selected-for-batch' : ''} ${isHighlighted ? 'highlighted-search-item' : ''} ${isLockedClient ? 'locked-media-card' : ''}" data-video-id="${item.id}" data-type="${itemType}">
         <div class="card-media-wrapper ${aspectClass}">
           ${this.isSelectionMode ? `
             <div class="media-checkbox-container ${isSelected ? 'checked' : ''}" data-id="${item.id}" title="${isSelected ? 'Desmarcar' : 'Selecionar'}">
@@ -5773,13 +6007,36 @@ class EntregaApp {
             </div>
           ` : ''}
 
+          ${isProtected ? `
+            <div class="card-lock-badge" title="${isLockedClient ? 'Arquivo protegido por senha (clique para desbloquear)' : 'Protegido por senha'}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+            </div>
+          ` : ''}
+
           ${unresolvedCount > 0 ? `
             <div class="card-unresolved-badge" title="${unresolvedCount} comentário${unresolvedCount > 1 ? 's' : ''} não resolvido${unresolvedCount > 1 ? 's' : ''}">
               <span class="unresolved-num">${unresolvedCount}</span>
             </div>
           ` : ''}
 
-          ${(isImage || isPdf) ? `
+          ${isLockedClient ? `
+            <div class="card-file-display card-locked-display">
+              <div class="file-icon-box locked-box">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+                </svg>
+              </div>
+              <span class="card-locked-label">Protegido por senha</span>
+            </div>
+            <span class="card-media-type-pill file-pill" style="${item.color ? `background-color: ${item.color}; color: #fff; border-color: ${item.color};` : ''}">
+              ${ext}
+            </span>
+            <div class="card-play-overlay">
+              <div class="play-icon-circle" title="Desbloquear arquivo">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+              </div>
+            </div>
+          ` : ((isImage || isPdf) ? `
             <img class="card-preview-image" src="${cardImgSrc}" alt="${this.getDisplayTitle(item)}" loading="lazy" decoding="async" onerror="window.handleMediaThumbError && window.handleMediaThumbError(this, '${item.driveFileId || ''}', '${item.url || ''}')" onload="if (this.naturalWidth && !this.closest('.video-card').querySelector('.card-photo-res')?.textContent?.includes('x')) { const el = this.closest('.video-card').querySelector('.card-photo-res'); if (el && !${isPdf}) el.textContent = this.naturalWidth + 'x' + this.naturalHeight; }" />
             
             <span class="card-media-type-pill ${pillClass}" style="${item.color ? `background-color: ${item.color}; color: #fff; border-color: ${item.color};` : ''}">
@@ -5876,7 +6133,7 @@ class EntregaApp {
                 <svg width="24" height="24" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
               </div>
             </div>
-          `))}
+          `)))}
         </div>
 
         <div class="card-info">
@@ -5955,10 +6212,14 @@ class EntregaApp {
         <div class="subfolders-section">
           <div class="subfolders-grid">
             ${subfoldersAtLevel.map(sub => {
+              const isSubProtected = this.isFolderPasswordProtected(sub, proj);
+              const isSubLocked = this.isFolderLockedForClient(sub, proj);
               const directFiles = (proj.videos || []).filter(v => (v.driveFolderId || v.folderId) === sub.id).length;
               const directChildren = folders.filter(f => f.parentId === sub.id).length;
               let countStr = '';
-              if (directChildren > 0 && directFiles > 0) {
+              if (isSubLocked) {
+                countStr = 'Protegida por senha';
+              } else if (directChildren > 0 && directFiles > 0) {
                 countStr = `${directChildren} pasta${directChildren > 1 ? 's' : ''} • ${directFiles} arquivo${directFiles > 1 ? 's' : ''}`;
               } else if (directChildren > 0) {
                 countStr = `${directChildren} pasta${directChildren > 1 ? 's' : ''}`;
@@ -5987,6 +6248,11 @@ class EntregaApp {
                     <span class="subfolder-count">${countStr}</span>
                   </div>
                   <div class="subfolder-actions">
+                    ${isSubProtected ? `
+                      <span class="subfolder-lock-badge" title="${isSubLocked ? 'Pasta protegida por senha (clique para desbloquear)' : 'Pasta protegida por senha'}">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+                      </span>
+                    ` : ''}
                     ${unresolvedInSub > 0 ? `
                       <span class="col-unresolved-badge" title="${unresolvedInSub} comentário${unresolvedInSub > 1 ? 's' : ''} a resolver">${unresolvedInSub}</span>
                     ` : ''}
@@ -6784,6 +7050,8 @@ class EntregaApp {
               const totalInside = directFiles + directSubs;
               const isFolderBatchSelected = this.isSelectionMode && this.selectedFolderIds && this.selectedFolderIds.has(sub.id);
               const unresolvedInSub = this.getUnresolvedCommentsCountForFolder(effectiveProj, sub.id);
+              const isSubProtected = this.isFolderPasswordProtected(sub, effectiveProj);
+              const isSubLocked = this.isFolderLockedForClient(sub, effectiveProj);
 
               return `
                 <div class="macos-col-item macos-col-folder ${folderItemClass} ${isFolderBatchSelected ? 'selected-for-batch' : ''}" 
@@ -6807,8 +7075,9 @@ class EntregaApp {
                     <span class="macos-col-name">${this.escapeHtml(sub.name)}</span>
                   </div>
                   <div class="macos-col-item-right">
+                    ${isSubProtected ? `<span class="macos-col-lock-icon" title="${isSubLocked ? 'Pasta protegida por senha (clique para desbloquear)' : 'Pasta protegida por senha'}"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg></span>` : ''}
                     ${unresolvedInSub > 0 ? `<span class="col-unresolved-badge" title="${unresolvedInSub} comentário${unresolvedInSub > 1 ? 's' : ''} a resolver">${unresolvedInSub}</span>` : ''}
-                    ${totalInside > 0 ? `<span class="macos-col-badge">${totalInside}</span>` : ''}
+                    ${(!isSubLocked && totalInside > 0) ? `<span class="macos-col-badge">${totalInside}</span>` : ''}
                     <svg class="macos-col-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <polyline points="9 18 15 12 9 6"></polyline>
                     </svg>
@@ -6826,6 +7095,8 @@ class EntregaApp {
               const isPdf = itemType === 'pdf';
               const ext = (this.getFileExtension(item) || '').replace(/^\./, '').toUpperCase() || itemType.toUpperCase();
               const unresolved = this.getUnresolvedCommentsCount(item.id);
+              const isItemProtected = this.isVideoPasswordProtected(item, effectiveProj);
+              const isItemLocked = this.isVideoLockedForClient(item, effectiveProj);
 
               return `
                 <div class="macos-col-item macos-col-file ${isSelected ? 'active' : ''} ${isItemBatchSelected ? 'selected-for-batch' : ''}" 
@@ -6864,6 +7135,7 @@ class EntregaApp {
                     <span class="macos-col-name">${this.escapeHtml(this.getDisplayTitle(item))}</span>
                   </div>
                   <div class="macos-col-item-right">
+                    ${isItemProtected ? `<span class="macos-col-lock-icon" title="${isItemLocked ? 'Arquivo protegido por senha (clique para desbloquear)' : 'Arquivo protegido por senha'}"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg></span>` : ''}
                     ${unresolved > 0 ? `<span class="col-unresolved-badge" title="${unresolved} comentário${unresolved > 1 ? 's' : ''} a resolver">${unresolved}</span>` : ''}
                     <span class="macos-col-ext-tag">${ext}</span>
                   </div>
@@ -6893,11 +7165,19 @@ class EntregaApp {
       const unresolved = this.getUnresolvedCommentsCount(previewItem.id);
       const sizeStr = this.formatFileSize(previewItem.size);
       const showItemCopy = (!this.isClientMode) || (effectiveProj && this.isShareAllowedForVideo(previewItem, effectiveProj));
+      const isPreviewLocked = this.isVideoLockedForClient(previewItem, effectiveProj);
 
       previewPanelHtml = `
         <div class="macos-preview-column" id="macosPreviewColumn">
           <div class="macos-preview-hero">
-            ${isImage || isPdf ? `
+            ${isPreviewLocked ? `
+              <div class="macos-preview-generic-box macos-preview-locked-box">
+                <svg width="42" height="42" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+                </svg>
+                <span style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">Protegido por senha</span>
+              </div>
+            ` : (isImage || isPdf ? `
               <img class="macos-preview-thumb" src="${previewItem.thumbnailUrl || (previewItem.driveFileId ? `/api/stream/preview?drive=${previewItem.driveFileId}&size=600` : previewItem.url)}" alt="${this.escapeHtml(this.getDisplayTitle(previewItem))}" decoding="async" onerror="window.handleMediaThumbError && window.handleMediaThumbError(this, '${previewItem.driveFileId || ''}', '${previewItem.url || ''}')" />
             ` : (isAudio ? `
               <div class="macos-preview-audio-disc">
@@ -6920,7 +7200,7 @@ class EntregaApp {
                   <polyline points="14 2 14 8 20 8"></polyline>
                 </svg>
               </div>
-            `))}
+            `)))}
           </div>
 
           <div class="macos-preview-details">
@@ -6956,16 +7236,18 @@ class EntregaApp {
 
             <div class="macos-preview-actions">
               <button class="btn-primary btn-block" id="btnMacosOpenPlayer" data-file-id="${previewItem.id}">
-                ${isVideo ? 'Assistir Vídeo' : (isAudio ? 'Ouvir Faixa' : 'Abrir Arquivo')}
+                ${isPreviewLocked ? 'Desbloquear Arquivo' : (isVideo ? 'Assistir Vídeo' : (isAudio ? 'Ouvir Faixa' : 'Abrir Arquivo'))}
               </button>
               ${showItemCopy ? `
                 <button class="btn-secondary btn-block" id="btnMacosCopyLink" data-file-id="${previewItem.id}" data-file-code="${previewItem.shortCode || previewItem.id}">
                   Copiar Link
                 </button>
               ` : ''}
-              <a class="btn-secondary btn-block" href="${previewItem.url ? `${previewItem.url}${previewItem.url.includes('?') ? '&' : '?'}download=1` : '#'}" download="${this.escapeHtml(previewItem.fileName || previewItem.title)}">
-                Baixar Original
-              </a>
+              ${!isPreviewLocked ? `
+                <a class="btn-secondary btn-block" href="${previewItem.url ? `${previewItem.url}${previewItem.url.includes('?') ? '&' : '?'}download=1` : '#'}" download="${this.escapeHtml(previewItem.fileName || previewItem.title)}">
+                  Baixar Original
+                </a>
+              ` : ''}
             </div>
           </div>
         </div>
@@ -7031,6 +7313,10 @@ class EntregaApp {
           ? `/${(subFolderObj && subFolderObj.shortCode) || proj.shortCode || proj.slug}`
           : `/author?project=${proj.id}&folder=${encodeURIComponent(targetFid)}`;
         window.history.pushState({}, '', targetUrl);
+        if (subFolderObj && this.isFolderLockedForClient(subFolderObj, proj)) {
+          this.render();
+          return;
+        }
         if (this.galleryViewMode === 'columns') {
           this.updateGalleryDynamicArea(container);
         } else {
@@ -7589,6 +7875,11 @@ class EntregaApp {
           ? `/${(subFolderObj && subFolderObj.shortCode) || (activeProj && (activeProj.shortCode || activeProj.slug)) || ''}`
           : (activeProj ? `/author?project=${activeProj.id}&folder=${encodeURIComponent(fId)}` : `/author?folder=${encodeURIComponent(fId)}`);
         window.history.pushState({}, '', targetUrl);
+
+        if (subFolderObj && this.isFolderLockedForClient(subFolderObj, activeProj)) {
+          this.render();
+          return;
+        }
 
         this.updateGalleryDynamicArea(container);
       });
@@ -9158,9 +9449,34 @@ class EntregaApp {
     });
   }
 
-  renderPasswordGate() {
+  renderPasswordGate(gateContext = null) {
     const container = document.getElementById('mainContentArea');
     if (!container) return;
+
+    const proj = this.selectedProject || {};
+    const ctx = gateContext || {
+      type: proj.lockedTargetType || 'project',
+      targetName: proj.lockedTargetName || proj.title || '',
+      folderId: proj.lockedFolderId || null,
+      videoId: proj.lockedVideoId || null,
+      shortCode: proj.shortCode || null,
+      isRootGate: true
+    };
+
+    const isFileGate = ctx.type === 'file';
+    const isFolderGate = ctx.type === 'folder';
+    const cardTitle = isFileGate
+      ? 'Arquivo Protegido'
+      : (isFolderGate ? 'Pasta Protegida' : 'Entrega Protegida');
+    const targetLabel = ctx.targetName ? ` "${this.escapeHtml(ctx.targetName)}"` : '';
+    const cardDesc = isFileGate
+      ? `Digite a senha fornecida pelo autor para acessar o arquivo${targetLabel}.`
+      : (isFolderGate
+        ? `Digite a senha fornecida pelo autor para abrir a pasta${targetLabel}.`
+        : 'Digite a senha fornecida pelo autor para abrir o projeto.');
+    const btnText = isFileGate
+      ? 'Desbloquear Arquivo'
+      : (isFolderGate ? 'Desbloquear Pasta' : 'Desbloquear Entrega');
 
     container.innerHTML = `
       <div class="password-gate-container">
@@ -9168,47 +9484,114 @@ class EntregaApp {
           <div class="lock-icon-wrapper">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
           </div>
-          <h2 class="password-card-title">Entrega Protegida</h2>
-          <p class="password-card-desc">Digite a senha fornecida pelo autor para abrir o projeto.</p>
+          <h2 class="password-card-title">${cardTitle}</h2>
+          <p class="password-card-desc">${cardDesc}</p>
           
           <form id="passwordForm" style="display: flex; flex-direction: column; gap: 14px;">
             <input type="password" id="inputPassword" class="form-input" placeholder="Digite a senha de acesso" required autofocus>
             <div id="passwordError" style="color: var(--danger); font-size: 12px; display: none;">Senha incorreta. Tente novamente.</div>
-            <button type="submit" class="btn-primary" style="justify-content: center; padding: 12px;">Desbloquear Entrega</button>
+            <button type="submit" class="btn-primary" style="justify-content: center; padding: 12px;">${btnText}</button>
+            ${ctx.canGoBack ? `
+              <button type="button" id="btnPasswordGateBack" class="btn-secondary" style="justify-content: center; padding: 10px;">Voltar</button>
+            ` : ''}
           </form>
         </div>
       </div>
     `;
 
+    document.getElementById('btnPasswordGateBack')?.addEventListener('click', () => {
+      if (isFileGate) {
+        this.selectedVideo = null;
+        this.currentView = 'client_gallery';
+        const folderObj = (proj.folders || []).find(f => f.id === (this.currentFolderId || this.scopedFolderId));
+        const backCode = (folderObj && folderObj.shortCode) || proj.shortCode || proj.slug || '';
+        window.history.pushState({}, '', `/${backCode}`);
+        this.render();
+      } else if (isFolderGate) {
+        this.currentFolderId = ctx.parentFolderId || this.scopedFolderId || null;
+        const folderObj = (proj.folders || []).find(f => f.id === this.currentFolderId);
+        const backCode = (folderObj && folderObj.shortCode) || proj.shortCode || proj.slug || '';
+        window.history.pushState({}, '', `/${backCode}`);
+        this.render();
+      }
+    });
+
     document.getElementById('passwordForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const pwd = document.getElementById('inputPassword').value.trim();
-      const res = await window.API.verifyPassword(this.selectedProject, pwd);
+      const verifyPayload = {
+        id: proj.id,
+        projectId: proj.id,
+        shortCode: ctx.shortCode || proj.shortCode,
+        slug: proj.slug,
+        folderId: ctx.folderId || null,
+        videoId: ctx.videoId || null
+      };
+      const res = await window.API.verifyPassword(verifyPayload, pwd);
       if (res && res.verified) {
-        const proj = this.selectedProject || {};
-        if (proj.id) this.unlockedSlugs.add(proj.id);
-        if (proj.slug) this.unlockedSlugs.add(proj.slug);
-        if (proj.shortCode) this.unlockedSlugs.add(proj.shortCode);
-        if (res.projectId) this.unlockedSlugs.add(res.projectId);
-        if (res.shortCode) this.unlockedSlugs.add(res.shortCode);
+        const markUnlocked = (key) => {
+          if (!key) return;
+          const k = String(key);
+          this.unlockedSlugs.add(k);
+          this.unlockedSlugs.add(k.toLowerCase());
+          if (!this.unlockedPasswords) this.unlockedPasswords = {};
+          this.unlockedPasswords[k] = pwd;
+          this.unlockedPasswords[k.toLowerCase()] = pwd;
+        };
 
-        if (!this.unlockedPasswords) this.unlockedPasswords = {};
-        if (proj.id) this.unlockedPasswords[proj.id] = pwd;
-        if (proj.slug) this.unlockedPasswords[proj.slug] = pwd;
-        if (proj.shortCode) this.unlockedPasswords[proj.shortCode] = pwd;
-        if (res.projectId) this.unlockedPasswords[res.projectId] = pwd;
-        if (res.shortCode) this.unlockedPasswords[res.shortCode] = pwd;
+        if (ctx.isRootGate) {
+          markUnlocked(proj.id);
+          markUnlocked(proj.slug);
+          markUnlocked(proj.shortCode);
+        }
+        markUnlocked(ctx.folderId);
+        markUnlocked(ctx.videoId);
+        markUnlocked(ctx.shortCode);
+        markUnlocked(res.projectId && ctx.isRootGate ? res.projectId : null);
+        markUnlocked(res.folderId);
+        markUnlocked(res.videoId);
+        markUnlocked(res.shortCode);
 
-        // Armazena também pelo código ou slug da URL atual para navegação imediata
         const currentPath = window.location.pathname.replace(/^\/+/, '').split('/')[0];
         if (currentPath) {
-          this.unlockedPasswords[currentPath] = pwd;
-          this.unlockedPasswords[currentPath.toLowerCase()] = pwd;
+          markUnlocked(currentPath);
         }
 
-        await this.fetchData();
-        this.detectRoute();
-        this.render();
+        if (!ctx.isRootGate) {
+          const prevProjId = proj.id;
+          const prevScopedFolderId = this.scopedFolderId;
+          const prevCurrentFolderId = this.currentFolderId;
+          const prevIsIsolatedFile = this.isIsolatedFile;
+          const prevView = this.currentView;
+          const prevVideoId = ctx.videoId || (this.selectedVideo && this.selectedVideo.id) || null;
+
+          // Busca os dados usando o escopo raiz da sessão atual para não isolar o projeto em um único arquivo/subpasta
+          const scopedFolderObj = prevScopedFolderId ? (proj.folders || []).find(f => f.id === prevScopedFolderId) : null;
+          const rootCodeForFetch = (scopedFolderObj && scopedFolderObj.shortCode) || proj.shortCode || proj.slug || '';
+          this._overrideDataCode = rootCodeForFetch || null;
+          try {
+            await this.fetchData();
+          } finally {
+            this._overrideDataCode = null;
+          }
+
+          const refreshedProj = (this.data.projects || []).find(p => p.id === prevProjId) || this.data.projects[0];
+          if (refreshedProj) {
+            this.selectedProject = refreshedProj;
+            this.scopedFolderId = prevScopedFolderId;
+            this.currentFolderId = prevCurrentFolderId;
+            this.isIsolatedFile = prevIsIsolatedFile;
+            this.currentView = prevView;
+            if (prevVideoId) {
+              this.selectedVideo = (refreshedProj.videos || []).find(v => v.id === prevVideoId) || null;
+            }
+          }
+          this.render();
+        } else {
+          await this.fetchData();
+          this.detectRoute();
+          this.render();
+        }
       } else {
         const errEl = document.getElementById('passwordError');
         if (errEl) errEl.style.display = 'block';
@@ -12167,6 +12550,14 @@ class EntregaApp {
       const allowShare = document.getElementById('editMediaAllowShare')
         ? document.getElementById('editMediaAllowShare').checked
         : true;
+      const rawPasswordInput = document.getElementById('editMediaPassword')
+        ? document.getElementById('editMediaPassword').value.trim()
+        : '';
+      const inheritedPwdInfo = this.getInheritedPasswordInfoForVideo(vid, proj);
+      // Se o valor digitado for exatamente igual à senha herdada do pai (ou vazio), não grava cópia redundante no filho
+      const passwordToSave = (inheritedPwdInfo && rawPasswordInput === inheritedPwdInfo.password)
+        ? ''
+        : rawPasswordInput;
       const btnSave = document.getElementById('btnSaveEditMedia');
       const btnProceed = document.getElementById('btnProceedRenameMedia');
 
@@ -12181,10 +12572,12 @@ class EntregaApp {
             btnProceed.textContent = 'Salvando no Drive...';
           }
 
-          const res = await window.API.setVideoComments(proj.id, vid.id, allowComments, title, hideBrandName, allowShare);
+          const res = await window.API.setVideoComments(proj.id, vid.id, allowComments, title, hideBrandName, allowShare, undefined, passwordToSave);
           vid.allowComments = allowComments;
           vid.hideBrandName = hideBrandName;
           vid.allowShare = allowShare;
+          vid.password = passwordToSave || null;
+          vid.hasOwnPassword = Boolean(passwordToSave);
           if (res && res.video) {
             if (res.video.title) vid.title = res.video.title;
             if (res.video.fileName) vid.fileName = res.video.fileName;
@@ -12198,6 +12591,8 @@ class EntregaApp {
             pVid.allowComments = allowComments;
             pVid.hideBrandName = hideBrandName;
             pVid.allowShare = allowShare;
+            pVid.password = passwordToSave || null;
+            pVid.hasOwnPassword = Boolean(passwordToSave);
             pVid.title = vid.title;
             pVid.fileName = vid.fileName;
           }
@@ -12252,6 +12647,13 @@ class EntregaApp {
       const allowShare = document.getElementById('editFolderAllowShare')
         ? document.getElementById('editFolderAllowShare').checked
         : true;
+      const rawPasswordInput = document.getElementById('editFolderPassword')
+        ? document.getElementById('editFolderPassword').value.trim()
+        : '';
+      const inheritedPwdInfo = this.getInheritedPasswordInfoForFolder(folder, proj);
+      const passwordToSave = (inheritedPwdInfo && rawPasswordInput === inheritedPwdInfo.password)
+        ? ''
+        : rawPasswordInput;
       const btnSave = document.getElementById('btnSaveEditFolder');
 
       try {
@@ -12260,23 +12662,27 @@ class EntregaApp {
           btnSave.textContent = 'Salvando...';
         }
 
-        await window.API.setFolderComments(proj.id, folder.id, allowComments, name, hideBrandName, allowShare);
+        await window.API.setFolderComments(proj.id, folder.id, allowComments, name, hideBrandName, allowShare, undefined, passwordToSave);
         folder.allowComments = allowComments;
         folder.hideBrandName = hideBrandName;
         folder.allowShare = allowShare;
+        folder.password = passwordToSave || null;
+        folder.hasOwnPassword = Boolean(passwordToSave);
         if (name) folder.name = name;
         const pFolder = (proj.folders || []).find(f => f.id === folder.id);
         if (pFolder) {
           pFolder.allowComments = allowComments;
           pFolder.hideBrandName = hideBrandName;
           pFolder.allowShare = allowShare;
+          pFolder.password = passwordToSave || null;
+          pFolder.hasOwnPassword = Boolean(passwordToSave);
           if (name) pFolder.name = name;
         }
 
         document.getElementById('modalEditFolder')?.classList.remove('open');
         window.showToast('Configurações da pasta atualizadas!');
         const mainContentArea = document.getElementById('mainContentArea');
-        this.syncSidebarActiveProject(updated);
+        this.syncSidebarActiveProject(proj);
         if (this.galleryViewMode === 'columns' && mainContentArea) {
           this.updateGalleryDynamicArea(mainContentArea);
         } else {

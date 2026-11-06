@@ -644,6 +644,127 @@ function isFolderShareAllowed(folder, project, scopedFolderId = null) {
   return project.allowShare !== false;
 }
 
+// Retorna a cadeia de escopos de senha que protegem uma pasta (da própria pasta subindo até o diretório raiz)
+// Regra: se a própria pasta, qualquer pasta-pai ou o diretório-pai tiver senha, o item herda a proteção.
+function getFolderPasswordChain(folderOrId, project, scopedFolderId = null) {
+  if (!project) return [];
+  const folders = project.folders || [];
+  let curFolder = typeof folderOrId === 'object' && folderOrId !== null
+    ? folderOrId
+    : (folderOrId ? folders.find(f => f.id === folderOrId || f.shortCode === folderOrId) : null);
+
+  const chain = [];
+  const visited = new Set();
+
+  while (curFolder && !visited.has(curFolder.id)) {
+    visited.add(curFolder.id);
+    const fPwd = curFolder.password ? String(curFolder.password).trim() : '';
+    if (fPwd) {
+      chain.push({
+        scopeType: 'folder',
+        id: curFolder.id,
+        shortCode: curFolder.shortCode || null,
+        slug: null,
+        name: curFolder.name || 'Pasta',
+        password: fPwd
+      });
+    }
+    if (scopedFolderId && curFolder.id === scopedFolderId) {
+      break;
+    }
+    curFolder = curFolder.parentId ? folders.find(f => f.id === curFolder.parentId) : null;
+  }
+
+  // Se a navegação está escopada em scopedFolderId mas nenhuma senha própria foi definida até ele,
+  // herda a proteção de qualquer pasta ancestral ou do diretório-pai
+  if (scopedFolderId && chain.length === 0) {
+    let ancestor = curFolder && curFolder.parentId ? folders.find(f => f.id === curFolder.parentId) : null;
+    while (ancestor && !visited.has(ancestor.id)) {
+      visited.add(ancestor.id);
+      const aPwd = ancestor.password ? String(ancestor.password).trim() : '';
+      if (aPwd) {
+        chain.push({
+          scopeType: 'folder',
+          id: ancestor.id,
+          shortCode: ancestor.shortCode || null,
+          slug: null,
+          name: ancestor.name || 'Pasta',
+          password: aPwd
+        });
+        break;
+      }
+      ancestor = ancestor.parentId ? folders.find(f => f.id === ancestor.parentId) : null;
+    }
+  }
+
+  const projPwd = project.password ? String(project.password).trim() : '';
+  if (projPwd && (!scopedFolderId || chain.length === 0)) {
+    chain.push({
+      scopeType: 'project',
+      id: project.id,
+      shortCode: project.shortCode || null,
+      slug: project.slug || null,
+      name: project.name || 'Diretório',
+      password: projPwd
+    });
+  }
+
+  return chain;
+}
+
+// Retorna a cadeia de escopos de senha que protegem um arquivo/mídia (do próprio arquivo subindo até o diretório raiz)
+function getVideoPasswordChain(itemOrId, project, scopedFolderId = null) {
+  if (!project) return [];
+  const videos = project.videos || [];
+  const item = typeof itemOrId === 'object' && itemOrId !== null
+    ? itemOrId
+    : (itemOrId ? videos.find(v => v.id === itemOrId || v.shortCode === itemOrId || v.driveFileId === itemOrId) : null);
+
+  const chain = [];
+  if (item) {
+    const vPwd = item.password ? String(item.password).trim() : '';
+    if (vPwd) {
+      chain.push({
+        scopeType: 'file',
+        id: item.id,
+        shortCode: item.shortCode || null,
+        driveFileId: item.driveFileId || null,
+        slug: null,
+        name: item.title || item.fileName || 'Arquivo',
+        password: vPwd
+      });
+    }
+    const parentFolderId = item.driveFolderId || item.folderId;
+    if (parentFolderId && parentFolderId !== project.driveFolderId) {
+      const folderChain = getFolderPasswordChain(parentFolderId, project, scopedFolderId);
+      chain.push(...folderChain);
+      return chain;
+    }
+  }
+
+  const projPwd = project.password ? String(project.password).trim() : '';
+  if (projPwd) {
+    chain.push({
+      scopeType: 'project',
+      id: project.id,
+      shortCode: project.shortCode || null,
+      slug: project.slug || null,
+      name: project.name || 'Diretório',
+      password: projPwd
+    });
+  }
+
+  return chain;
+}
+
+function isFolderPasswordProtected(folderOrId, project, scopedFolderId = null) {
+  return getFolderPasswordChain(folderOrId, project, scopedFolderId).length > 0;
+}
+
+function isVideoPasswordProtected(itemOrId, project, scopedFolderId = null) {
+  return getVideoPasswordChain(itemOrId, project, scopedFolderId).length > 0;
+}
+
 // Obtém o banco de dados do usuário
 function getUserDb(identifier) {
   ensureDirectories();
@@ -1768,6 +1889,10 @@ module.exports = {
   isFolderCommentsAllowed,
   isShareAllowed,
   isFolderShareAllowed,
+  getFolderPasswordChain,
+  getVideoPasswordChain,
+  isFolderPasswordProtected,
+  isVideoPasswordProtected,
   getPendingNotifications,
   extractMentionsFromText,
   getProjectParticipants,

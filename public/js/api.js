@@ -21,7 +21,9 @@ const API = {
     }
 
     const params = new URLSearchParams();
-    if (code) {
+    if (window.APP && window.APP._overrideDataCode) {
+      params.set('code', window.APP._overrideDataCode);
+    } else if (code) {
       params.set('code', code);
     } else if (slug) {
       params.set('slug', slug);
@@ -239,9 +241,10 @@ const API = {
     return await res.json();
   },
 
-  async setFolderComments(projectId, folderId, allowComments, name = null, hideBrandName = undefined, allowShare = undefined, color = undefined) {
+  async setFolderComments(projectId, folderId, allowComments, name = null, hideBrandName = undefined, allowShare = undefined, color = undefined, password = undefined) {
     const body = { allowComments, name, hideBrandName, allowShare };
     if (color !== undefined) body.color = color;
+    if (password !== undefined) body.password = password;
     const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(folderId)}/comments`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -254,9 +257,10 @@ const API = {
     return await res.json();
   },
 
-  async setVideoComments(projectId, videoId, allowComments, title = null, hideBrandName = undefined, allowShare = undefined, color = undefined) {
+  async setVideoComments(projectId, videoId, allowComments, title = null, hideBrandName = undefined, allowShare = undefined, color = undefined, password = undefined) {
     const body = { allowComments, title, hideBrandName, allowShare };
     if (color !== undefined) body.color = color;
+    if (password !== undefined) body.password = password;
     const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/comments`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -296,9 +300,11 @@ const API = {
   async verifyPassword(projectOrSlug, password) {
     const payload = (projectOrSlug && typeof projectOrSlug === 'object')
       ? {
-          projectId: projectOrSlug.id || null,
+          projectId: projectOrSlug.projectId || projectOrSlug.id || null,
           shortCode: projectOrSlug.shortCode || null,
           slug: projectOrSlug.slug || null,
+          folderId: projectOrSlug.folderId || null,
+          videoId: projectOrSlug.videoId || null,
           password
         }
       : { slug: projectOrSlug, password };

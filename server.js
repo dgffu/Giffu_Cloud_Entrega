@@ -189,11 +189,13 @@ function applyMirror(target, draft) {
   if (draft.fileType !== undefined) target.fileType = draft.fileType;
   if (draft.fileExt !== undefined) target.fileExt = draft.fileExt;
 
-  // Preserva shortCodes, allowComments, allowShare e hideBrandName existentes de pastas e arquivos/vídeos
+  // Preserva shortCodes, allowComments, allowShare, hideBrandName, password e color existentes de pastas e arquivos/vídeos
   const oldFolderCodes = new Map((target.folders || []).map(f => [f.id, f.shortCode]));
   const oldFolderComments = new Map((target.folders || []).map(f => [f.id, f.allowComments]));
   const oldFolderShare = new Map((target.folders || []).map(f => [f.id, f.allowShare]));
   const oldFolderBrand = new Map((target.folders || []).map(f => [f.id, f.hideBrandName]));
+  const oldFolderPassword = new Map((target.folders || []).map(f => [f.id, f.password]));
+  const oldFolderColor = new Map((target.folders || []).map(f => [f.id, f.color]));
   (draft.folders || []).forEach(f => {
     if (!f.shortCode && oldFolderCodes.has(f.id)) {
       f.shortCode = oldFolderCodes.get(f.id);
@@ -207,12 +209,20 @@ function applyMirror(target, draft) {
     if (f.hideBrandName === undefined && oldFolderBrand.has(f.id)) {
       f.hideBrandName = oldFolderBrand.get(f.id);
     }
+    if (f.password === undefined && oldFolderPassword.has(f.id) && oldFolderPassword.get(f.id)) {
+      f.password = oldFolderPassword.get(f.id);
+    }
+    if (f.color === undefined && oldFolderColor.has(f.id) && oldFolderColor.get(f.id)) {
+      f.color = oldFolderColor.get(f.id);
+    }
   });
 
   const oldVideoCodes = new Map((target.videos || []).map(v => [v.driveFileId || v.id, v.shortCode]));
   const oldVideoComments = new Map((target.videos || []).map(v => [v.driveFileId || v.id, v.allowComments]));
   const oldVideoShare = new Map((target.videos || []).map(v => [v.driveFileId || v.id, v.allowShare]));
   const oldVideoBrand = new Map((target.videos || []).map(v => [v.driveFileId || v.id, v.hideBrandName]));
+  const oldVideoPassword = new Map((target.videos || []).map(v => [v.driveFileId || v.id, v.password]));
+  const oldVideoColor = new Map((target.videos || []).map(v => [v.driveFileId || v.id, v.color]));
   const oldCustomCovers = new Map((target.videos || []).map(v => [v.driveFileId || v.id, { customThumbnailUrl: v.customThumbnailUrl, coverUrl: v.coverUrl }]));
   (draft.videos || []).forEach(v => {
     const key = v.driveFileId || v.id;
@@ -227,6 +237,12 @@ function applyMirror(target, draft) {
     }
     if (v.hideBrandName === undefined && oldVideoBrand.has(key)) {
       v.hideBrandName = oldVideoBrand.get(key);
+    }
+    if (v.password === undefined && oldVideoPassword.has(key) && oldVideoPassword.get(key)) {
+      v.password = oldVideoPassword.get(key);
+    }
+    if (v.color === undefined && oldVideoColor.has(key) && oldVideoColor.get(key)) {
+      v.color = oldVideoColor.get(key);
     }
     if (oldCustomCovers.has(key)) {
       const cov = oldCustomCovers.get(key);
@@ -256,7 +272,7 @@ function mirrorErrorStatus(err) {
   return 502;
 }
 
-// Helpers de verificação de propriedade e desbloqueio de senha de diretório
+// Helpers de verificação de propriedade e desbloqueio de senha de diretório, pastas e arquivos
 function isProjectOwnerUser(user, ownerUserId, ownerDb) {
   if (!user) return false;
   if (ownerUserId && user.id === ownerUserId) return true;
@@ -267,14 +283,19 @@ function isProjectOwnerUser(user, ownerUserId, ownerDb) {
   return Boolean(userEmail && dbEmail && userEmail === dbEmail);
 }
 
-function isProjectAccessAuthorized(req, project, ownerUserId, ownerDb) {
-  if (!project) return false;
-  const pwd = project.password ? String(project.password).trim() : '';
+function isScopeAuthorized(req, scope, ownerUserId, ownerDb) {
+  if (!scope) return true;
+  const pwd = scope.password ? String(scope.password).trim() : '';
   if (!pwd) return true;
   if (isProjectOwnerUser(req.user, ownerUserId, ownerDb)) return true;
-  if (auth && typeof auth.hasPasswordUnlock === 'function' && (auth.hasPasswordUnlock(req, project) || auth.hasPasswordUnlock(req, project.id))) {
-    return true;
+
+  const candidates = [scope.id, scope.shortCode, scope.slug, scope.driveFileId].filter(Boolean);
+  if (auth && typeof auth.hasPasswordUnlock === 'function') {
+    for (const c of candidates) {
+      if (auth.hasPasswordUnlock(req, c)) return true;
+    }
   }
+
   const providedPwd = (req.query && req.query.pwd) || (req.body && req.body.password) || req.headers['x-project-password'];
   if (providedPwd) {
     const pStr = String(providedPwd).trim();
@@ -286,22 +307,87 @@ function isProjectAccessAuthorized(req, project, ownerUserId, ownerDb) {
   return false;
 }
 
+function isProjectAccessAuthorized(req, project, ownerUserId, ownerDb) {
+  if (!project) return false;
+  const pwd = project.password ? String(project.password).trim() : '';
+  if (!pwd) return true;
+  return isScopeAuthorized(req, {
+    scopeType: 'project',
+    id: project.id,
+    shortCode: project.shortCode,
+    slug: project.slug,
+    password: pwd
+  }, ownerUserId, ownerDb);
+}
+
+function isFolderAccessAuthorized(req, folderOrId, project, ownerUserId, ownerDb, scopedFolderId = null) {
+  if (!project) return false;
+  if (isProjectOwnerUser(req.user, ownerUserId, ownerDb)) return true;
+  const chain = storage.getFolderPasswordChain(folderOrId, project, scopedFolderId);
+  if (chain.length === 0) return true;
+  // Quando é acesso direto à pasta escopada, o escopo imediato governante (chain[0]) desbloqueia a pasta
+  if (scopedFolderId && (folderOrId === scopedFolderId || (folderOrId && folderOrId.id === scopedFolderId))) {
+    return isScopeAuthorized(req, chain[0], ownerUserId, ownerDb);
+  }
+  return chain.every(s => isScopeAuthorized(req, s, ownerUserId, ownerDb));
+}
+
+function isVideoAccessAuthorized(req, videoOrId, project, ownerUserId, ownerDb) {
+  if (!project) return false;
+  if (isProjectOwnerUser(req.user, ownerUserId, ownerDb)) return true;
+  const chain = storage.getVideoPasswordChain(videoOrId, project);
+  if (chain.length === 0) return true;
+  // O escopo governante mais específico (chain[0]: senha do próprio arquivo, ou da pasta-pai, ou do diretório-pai)
+  // deve estar desbloqueado.
+  return isScopeAuthorized(req, chain[0], ownerUserId, ownerDb);
+}
+
 function sanitizeVideoForClient(v) {
   if (!v || typeof v !== 'object') return v;
   const copy = { ...v };
   delete copy.localPath;
+  delete copy.password;
   return copy;
 }
 
 function buildSafeClientPayload(req, { project, userDb, userId, type = 'project', code = null, folderId = null, videoId = null, includeResolvedTarget = false }) {
-  const hasPassword = Boolean(project.password && String(project.password).trim());
-  const unlocked = isProjectAccessAuthorized(req, project, userId, userDb);
-  const isLocked = hasPassword && !unlocked;
+  let rootLocked = false;
+  let lockedTargetType = type || 'project';
+  let lockedTargetName = project.name;
+  let lockedFolderId = folderId || null;
+  let lockedVideoId = videoId || null;
+
+  if (type === 'file' && videoId) {
+    const targetVid = (project.videos || []).find(v => v.id === videoId || v.shortCode === code || v.driveFileId === videoId);
+    const vChain = storage.getVideoPasswordChain(targetVid || videoId, project);
+    if (vChain.length > 0 && !isScopeAuthorized(req, vChain[0], userId, userDb)) {
+      rootLocked = true;
+      lockedTargetType = 'file';
+      lockedTargetName = (targetVid && (targetVid.title || targetVid.fileName)) || project.name;
+      lockedVideoId = targetVid ? targetVid.id : videoId;
+    }
+  } else if (type === 'folder' && folderId) {
+    const targetFolder = (project.folders || []).find(f => f.id === folderId || f.shortCode === code);
+    const fChain = storage.getFolderPasswordChain(targetFolder || folderId, project, folderId);
+    if (fChain.length > 0 && !isScopeAuthorized(req, fChain[0], userId, userDb)) {
+      rootLocked = true;
+      lockedTargetType = 'folder';
+      lockedTargetName = (targetFolder && targetFolder.name) || project.name;
+      lockedFolderId = targetFolder ? targetFolder.id : folderId;
+    }
+  } else {
+    const hasProjPassword = Boolean(project.password && String(project.password).trim());
+    if (hasProjPassword && !isProjectAccessAuthorized(req, project, userId, userDb)) {
+      rootLocked = true;
+      lockedTargetType = 'project';
+      lockedTargetName = project.name;
+    }
+  }
 
   let safeProject;
   let filteredComments = [];
 
-  if (isLocked) {
+  if (rootLocked) {
     safeProject = {
       id: project.id,
       name: project.name,
@@ -313,35 +399,121 @@ function buildSafeClientPayload(req, { project, userDb, userId, type = 'project'
       allowComments: project.allowComments,
       password: true,
       isLocked: true,
+      lockedTargetType,
+      lockedTargetName,
+      lockedFolderId,
+      lockedVideoId,
       videos: [],
       folders: []
     };
   } else {
-    let allowedFolders = Array.isArray(project.folders) ? [...project.folders] : [];
-    let allowedVideos = Array.isArray(project.videos) ? project.videos.map(sanitizeVideoForClient) : [];
+    let rawFolders = Array.isArray(project.folders) ? [...project.folders] : [];
+    let rawVideos = Array.isArray(project.videos) ? [...project.videos] : [];
 
     if (type === 'file' && videoId) {
-      allowedVideos = allowedVideos.filter(v => v.id === videoId || v.shortCode === code || v.driveFileId === videoId);
-      allowedFolders = [];
+      rawVideos = rawVideos.filter(v => v.id === videoId || v.shortCode === code || v.driveFileId === videoId);
+      rawFolders = [];
     } else if (type === 'folder' && folderId) {
       const folderSet = new Set([folderId]);
       let added = true;
       while (added) {
         added = false;
-        for (const f of allowedFolders) {
+        for (const f of rawFolders) {
           if (folderSet.has(f.parentId) && !folderSet.has(f.id)) {
             folderSet.add(f.id);
             added = true;
           }
         }
       }
-      allowedFolders = allowedFolders.filter(f => folderSet.has(f.id));
-      allowedVideos = allowedVideos.filter(v => folderSet.has(v.driveFolderId || v.folderId));
+      rawFolders = rawFolders.filter(f => folderSet.has(f.id));
+      rawVideos = rawVideos.filter(v => folderSet.has(v.driveFolderId || v.folderId));
     }
+
+    const scopedRootId = (type === 'folder' && folderId) ? folderId : null;
+
+    // 1. Identifica subpastas que possuem senha própria ainda não desbloqueada
+    const ownLockedFolderIds = new Set();
+    for (const f of rawFolders) {
+      if (scopedRootId && f.id === scopedRootId) continue;
+      const fPwd = f.password ? String(f.password).trim() : '';
+      if (fPwd) {
+        const fScope = { scopeType: 'folder', id: f.id, shortCode: f.shortCode, password: fPwd };
+        if (!isScopeAuthorized(req, fScope, userId, userDb)) {
+          ownLockedFolderIds.add(f.id);
+        }
+      }
+    }
+
+    // 2. Identifica pastas descendentes de uma pasta bloqueada (não devem ser expostas antes do desbloqueio do pai)
+    const foldersById = new Map(rawFolders.map(f => [f.id, f]));
+    const hiddenDescendantFolderIds = new Set();
+    for (const f of rawFolders) {
+      let curParentId = f.parentId;
+      const visited = new Set([f.id]);
+      while (curParentId && !visited.has(curParentId)) {
+        visited.add(curParentId);
+        if (ownLockedFolderIds.has(curParentId)) {
+          hiddenDescendantFolderIds.add(f.id);
+          break;
+        }
+        if (scopedRootId && curParentId === scopedRootId) break;
+        const pObj = foldersById.get(curParentId);
+        curParentId = pObj ? pObj.parentId : null;
+      }
+    }
+
+    const allowedFolders = rawFolders
+      .filter(f => !hiddenDescendantFolderIds.has(f.id))
+      .map(f => {
+        const fChain = storage.getFolderPasswordChain(f, project);
+        const hasOwnPassword = Boolean(f.password && String(f.password).trim());
+        const isLockedFolder = ownLockedFolderIds.has(f.id);
+        const fCopy = { ...f };
+        delete fCopy.password;
+        fCopy.password = fChain.length > 0;
+        fCopy.hasOwnPassword = hasOwnPassword;
+        fCopy.isLocked = isLockedFolder;
+        return fCopy;
+      });
+
+    // 3. Filtra vídeos dentro de pastas bloqueadas e sanitiza vídeos individuais com senha própria
+    const allowedVideos = rawVideos
+      .filter(v => {
+        const vFid = v.driveFolderId || v.folderId;
+        if (!vFid) return true;
+        return !ownLockedFolderIds.has(vFid) && !hiddenDescendantFolderIds.has(vFid);
+      })
+      .map(v => {
+        const vChain = storage.getVideoPasswordChain(v, project);
+        const hasOwnPassword = Boolean(v.password && String(v.password).trim());
+        let isLockedVideo = false;
+        if (hasOwnPassword && !(type === 'file' && videoId)) {
+          const vScope = { scopeType: 'file', id: v.id, shortCode: v.shortCode, driveFileId: v.driveFileId, password: String(v.password).trim() };
+          if (!isScopeAuthorized(req, vScope, userId, userDb)) {
+            isLockedVideo = true;
+          }
+        }
+        const vCopy = sanitizeVideoForClient(v);
+        vCopy.password = vChain.length > 0;
+        vCopy.hasOwnPassword = hasOwnPassword;
+        vCopy.isLocked = isLockedVideo;
+        if (isLockedVideo) {
+          vCopy.url = null;
+          vCopy.previewUrl = null;
+          vCopy.thumbnailUrl = null;
+          vCopy.customThumbnailUrl = null;
+          vCopy.coverUrl = null;
+          vCopy.driveFileId = null;
+          vCopy.cloudFileId = null;
+          vCopy.directDownloadUrl = null;
+        }
+        return vCopy;
+      });
 
     safeProject = {
       ...project,
       password: false,
+      hasOwnPassword: Boolean(project.password && String(project.password).trim()),
       isLocked: false,
       folders: allowedFolders,
       videos: allowedVideos
@@ -349,8 +521,8 @@ function buildSafeClientPayload(req, { project, userDb, userId, type = 'project'
     delete safeProject.driveLink;
     delete safeProject.resolvedDrivePath;
 
-    const allowedVideoIds = new Set(allowedVideos.map(v => v.id));
-    filteredComments = (userDb.comments || []).filter(c => c.projectId === project.id && allowedVideoIds.has(c.videoId));
+    const unlockedVideoIds = new Set(allowedVideos.filter(v => !v.isLocked).map(v => v.id));
+    filteredComments = (userDb.comments || []).filter(c => c.projectId === project.id && unlockedVideoIds.has(c.videoId));
   }
 
   const s = (userDb && userDb.settings) || {};
@@ -762,9 +934,17 @@ app.put('/api/projects/:id/folders/:folderId/comments', requireAuthor, async (re
   const folder = (project.folders || []).find(f => f.id === req.params.folderId);
   if (!folder) return res.status(404).json({ error: 'Pasta não encontrada' });
 
-  const { allowComments, allowShare, name, hideBrandName, color } = req.body;
+  const { allowComments, allowShare, name, hideBrandName, color, password } = req.body;
   if (color !== undefined) {
     folder.color = color ? String(color).trim() : null;
+  }
+  if (password !== undefined) {
+    const trimmedPwd = password ? String(password).trim() : '';
+    if (trimmedPwd) {
+      folder.password = trimmedPwd;
+    } else {
+      delete folder.password;
+    }
   }
   if (name !== undefined && typeof name === 'string' && name.trim()) {
     const newFolderName = name.trim();
@@ -797,7 +977,7 @@ app.put('/api/projects/:id/folders/:folderId/comments', requireAuthor, async (re
 
   project.updatedAt = new Date().toISOString();
   storage.saveUserDb(req.user.id, userDb);
-  res.json({ success: true, folder, color: folder.color, allowComments: folder.allowComments !== undefined ? folder.allowComments : null, allowShare: folder.allowShare !== undefined ? folder.allowShare : null, hideBrandName: folder.hideBrandName });
+  res.json({ success: true, folder, color: folder.color, password: folder.password || '', allowComments: folder.allowComments !== undefined ? folder.allowComments : null, allowShare: folder.allowShare !== undefined ? folder.allowShare : null, hideBrandName: folder.hideBrandName });
 });
 
 // 3.1.2 Atualizar permissão de comentários e nome para um arquivo/mídia específico (alterando no Google Drive)
@@ -809,9 +989,17 @@ app.put('/api/projects/:id/videos/:videoId/comments', requireAuthor, async (req,
   const video = (project.videos || []).find(v => v.id === req.params.videoId);
   if (!video) return res.status(404).json({ error: 'Arquivo não encontrado' });
 
-  const { allowComments, allowShare, title, hideBrandName, color } = req.body;
+  const { allowComments, allowShare, title, hideBrandName, color, password } = req.body;
   if (color !== undefined) {
     video.color = color ? String(color).trim() : null;
+  }
+  if (password !== undefined) {
+    const trimmedPwd = password ? String(password).trim() : '';
+    if (trimmedPwd) {
+      video.password = trimmedPwd;
+    } else {
+      delete video.password;
+    }
   }
   const newName = (typeof title === 'string') ? title.trim() : null;
 
@@ -864,7 +1052,7 @@ app.put('/api/projects/:id/videos/:videoId/comments', requireAuthor, async (req,
 
   project.updatedAt = new Date().toISOString();
   storage.saveUserDb(req.user.id, userDb);
-  res.json({ success: true, video, allowComments: video.allowComments !== undefined ? video.allowComments : null, allowShare: video.allowShare !== undefined ? video.allowShare : null, hideBrandName: video.hideBrandName });
+  res.json({ success: true, video, password: video.password || '', allowComments: video.allowComments !== undefined ? video.allowComments : null, allowShare: video.allowShare !== undefined ? video.allowShare : null, hideBrandName: video.hideBrandName });
 });
 
 // 3.1.3 Definir frame como capa personalizada do vídeo
@@ -1910,17 +2098,21 @@ function clearPasswordFailure(ip, targetId) {
   passwordAttempts.delete(key);
 }
 
-// 9. Verify project password (emite cookie HttpOnly assinado para desbloqueio seguro no servidor)
+// 9. Verify project/folder/file password (emite cookie HttpOnly assinado para desbloqueio seguro no servidor)
 app.post('/api/projects/verify-password', (req, res) => {
-  const { projectId, shortCode, slug, password } = req.body;
+  const { projectId, shortCode, slug, folderId, videoId, password } = req.body;
+  const resolvedLink = shortCode ? storage.resolveShortLink(shortCode) : null;
   const found = (projectId ? storage.findUserByProjectId(projectId) : null)
-    || (shortCode ? storage.resolveShortLink(shortCode) : null)
+    || resolvedLink
     || (slug ? storage.findProjectBySlug(slug) : null);
   if (!found || !found.project) return res.status(404).json({ error: 'Projeto não encontrado' });
   const { project } = found;
 
+  const effectiveVideoId = videoId || (resolvedLink && resolvedLink.type === 'file' ? resolvedLink.videoId : null);
+  const effectiveFolderId = folderId || (resolvedLink && resolvedLink.type === 'folder' ? resolvedLink.folderId : null);
+
   const clientIp = (req.ip || (req.headers['x-forwarded-for'] || '').split(',')[0] || req.socket.remoteAddress || 'unknown').trim();
-  const targetKey = project.id || shortCode || slug || 'generic';
+  const targetKey = effectiveVideoId || effectiveFolderId || project.id || shortCode || slug || 'generic';
 
   const rateLimit = checkPasswordRateLimit(clientIp, targetKey);
   if (!rateLimit.allowed) {
@@ -1931,15 +2123,72 @@ app.post('/api/projects/verify-password', (req, res) => {
     });
   }
 
-  const expected = String(project.password || '').trim();
+  let chain = [];
+  let targetFolderObj = null;
+  let targetVideoObj = null;
+
+  if (effectiveVideoId) {
+    targetVideoObj = (project.videos || []).find(v => v.id === effectiveVideoId || v.shortCode === shortCode || v.driveFileId === effectiveVideoId);
+    chain = storage.getVideoPasswordChain(targetVideoObj || effectiveVideoId, project);
+  } else if (effectiveFolderId) {
+    targetFolderObj = (project.folders || []).find(f => f.id === effectiveFolderId || f.shortCode === shortCode);
+    chain = storage.getFolderPasswordChain(targetFolderObj || effectiveFolderId, project);
+  } else {
+    const pPwd = String(project.password || '').trim();
+    if (pPwd) {
+      chain = [{
+        scopeType: 'project',
+        id: project.id,
+        shortCode: project.shortCode,
+        slug: project.slug,
+        password: pPwd
+      }];
+    }
+  }
+
   const provided = String(password || '').trim();
-  const isMatch = !expected || (auth && auth.safeEqual ? auth.safeEqual(expected, provided) : expected === provided);
+  const checkEqual = (a, b) => (auth && auth.safeEqual ? auth.safeEqual(a, b) : a === b);
+
+  // Verifica se a senha corresponde ao escopo governante mais específico (chain[0])
+  // ou a qualquer escopo correspondente na cadeia hierárquica
+  const matchedScopes = chain.filter(s => s.password && checkEqual(s.password, provided));
+  const isMatch = chain.length === 0 || (chain[0] && checkEqual(chain[0].password, provided));
+
   if (isMatch) {
     clearPasswordFailure(clientIp, targetKey);
-    if (auth && typeof auth.grantPasswordUnlock === 'function') {
-      auth.grantPasswordUnlock(req, res, [project.id, project.slug, project.shortCode]);
+    const unlockedIdentifiers = [];
+    for (const s of matchedScopes) {
+      if (s.id) unlockedIdentifiers.push(s.id);
+      if (s.shortCode) unlockedIdentifiers.push(s.shortCode);
+      if (s.slug) unlockedIdentifiers.push(s.slug);
+      if (s.driveFileId) unlockedIdentifiers.push(s.driveFileId);
     }
-    return res.json({ verified: true, projectId: project.id, shortCode: project.shortCode });
+    if (targetVideoObj) {
+      if (targetVideoObj.id) unlockedIdentifiers.push(targetVideoObj.id);
+      if (targetVideoObj.shortCode) unlockedIdentifiers.push(targetVideoObj.shortCode);
+      if (targetVideoObj.driveFileId) unlockedIdentifiers.push(targetVideoObj.driveFileId);
+    }
+    if (targetFolderObj) {
+      if (targetFolderObj.id) unlockedIdentifiers.push(targetFolderObj.id);
+      if (targetFolderObj.shortCode) unlockedIdentifiers.push(targetFolderObj.shortCode);
+    }
+    if (!effectiveVideoId && !effectiveFolderId) {
+      if (project.id) unlockedIdentifiers.push(project.id);
+      if (project.slug) unlockedIdentifiers.push(project.slug);
+      if (project.shortCode) unlockedIdentifiers.push(project.shortCode);
+    }
+
+    if (auth && typeof auth.grantPasswordUnlock === 'function') {
+      auth.grantPasswordUnlock(req, res, unlockedIdentifiers);
+    }
+    return res.json({
+      verified: true,
+      projectId: project.id,
+      shortCode: project.shortCode,
+      folderId: targetFolderObj ? targetFolderObj.id : null,
+      videoId: targetVideoObj ? targetVideoObj.id : null,
+      unlockedIds: unlockedIdentifiers
+    });
   }
 
   recordPasswordFailure(clientIp, targetKey);
@@ -1962,10 +2211,11 @@ app.post('/api/comments', requireUser, upload.single('image'), async (req, res) 
     return res.status(404).json({ error: 'Projeto não encontrado' });
   }
   const { userDb, userId, project } = found;
+  const targetVid = (project.videos || []).find(v => v.id === videoId);
 
-  if (!isProjectAccessAuthorized(req, project, userId, userDb)) {
+  if (!isVideoAccessAuthorized(req, targetVid || videoId, project, userId, userDb)) {
     if (req.file) { try { fs.unlinkSync(req.file.path); } catch (e) {} }
-    return res.status(401).json({ error: 'Diretório protegido por senha.' });
+    return res.status(401).json({ error: 'Item protegido por senha.' });
   }
 
   // Quem define se é Autor neste comentário é exclusivamente ser o dono deste projeto
@@ -2448,15 +2698,21 @@ async function handleDownloadZip(req, res) {
   if (!found) return res.status(404).send('Diretório não encontrado');
   const { project, userDb } = found;
 
-  // Verificar senha do projeto via cookie HttpOnly assinado, sessão do dono ou parâmetro
-  if (!isProjectAccessAuthorized(req, project, found.userId, userDb)) {
-    return res.status(401).send('Acesso bloqueado: senha incorreta');
-  }
-
   let targetVideos = project.videos || [];
   const itemsParam = req.query.items || req.body?.items;
   const folderParam = req.query.folder || req.query.pasta;
   const foldersParam = req.query.folders || req.body?.folders;
+
+  // Se está baixando o diretório inteiro (sem pasta ou itens específicos), exige autorização do diretório
+  if (!folderParam && !foldersParam && (!itemsParam || itemsParam === 'all')) {
+    if (!isProjectAccessAuthorized(req, project, found.userId, userDb)) {
+      return res.status(401).send('Acesso bloqueado: senha incorreta');
+    }
+  } else if (folderParam && !foldersParam && (!itemsParam || itemsParam === 'all')) {
+    if (!isFolderAccessAuthorized(req, folderParam, project, found.userId, userDb, folderParam)) {
+      return res.status(401).send('Acesso bloqueado: senha da pasta incorreta');
+    }
+  }
 
   if (foldersParam || (itemsParam && itemsParam !== 'all')) {
     const selectedItemIds = new Set();
@@ -2506,8 +2762,11 @@ async function handleDownloadZip(req, res) {
     });
   }
 
+  // Filtra apenas os vídeos para os quais o usuário tem autorização de senha (pasta e arquivo)
+  targetVideos = targetVideos.filter(v => isVideoAccessAuthorized(req, v, project, found.userId, userDb));
+
   if (targetVideos.length === 0) {
-    return res.status(400).send('Nenhum arquivo disponível para compactação');
+    return res.status(401).send('Nenhum arquivo desbloqueado disponível para compactação');
   }
 
   const scopedFolderObj = folderParam ? (project.folders || []).find(f => f.id === folderParam) : null;
@@ -3288,8 +3547,8 @@ app.get('/api/stream/preview', async (req, res) => {
   }
 
   const { video, project, userDb, userId } = found;
-  if (project && !isProjectAccessAuthorized(req, project, userId, userDb)) {
-    return res.status(401).send('Acesso bloqueado: senha do diretório necessária');
+  if (project && !isVideoAccessAuthorized(req, video, project, userId, userDb)) {
+    return res.status(401).send('Acesso bloqueado: senha necessária');
   }
 
   const requestedSize = parseInt(req.query.size, 10);
@@ -3414,16 +3673,15 @@ app.get('/api/stream/cloud', async (req, res) => {
     const isDownload = req.query.download === '1';
 
     let foundProject = null;
+    let foundUserId = null;
     let userDb = null;
 
     if (proj) {
       const found = storage.findUserByProjectId(proj);
       if (found) {
         foundProject = found.project;
+        foundUserId = found.userId;
         userDb = found.userDb;
-        if (!isProjectAccessAuthorized(req, foundProject, found.userId, userDb)) {
-          return res.status(401).send('Acesso bloqueado: senha do diretório necessária');
-        }
       }
     }
 
@@ -3434,6 +3692,15 @@ app.get('/api/stream/cloud', async (req, res) => {
     let targetFile = null;
     if (foundProject && Array.isArray(foundProject.videos)) {
       targetFile = foundProject.videos.find(v => v.id === fileId || v.cloudFileId === fileId);
+    }
+
+    if (foundProject) {
+      const isAuth = targetFile
+        ? isVideoAccessAuthorized(req, targetFile, foundProject, foundUserId, userDb)
+        : isProjectAccessAuthorized(req, foundProject, foundUserId, userDb);
+      if (!isAuth) {
+        return res.status(401).send('Acesso bloqueado: senha necessária');
+      }
     }
 
     if (!targetFile) {

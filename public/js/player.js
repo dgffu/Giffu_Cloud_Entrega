@@ -380,6 +380,24 @@ class CustomVideoPlayer {
     return { isLandscape, direction, angle, type };
   }
 
+  isMobileDevice() {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      (navigator.maxTouchPoints > 1 && window.innerWidth <= 1024);
+  }
+
+  isVerticalVideo() {
+    if (this.video && this.video.videoHeight > 0 && this.video.videoWidth > 0) {
+      return this.video.videoHeight > this.video.videoWidth;
+    }
+    if (this.videoData && this.videoData.aspectRatio) {
+      return ['9:16', '3:4', '2:3', 'portrait'].includes(this.videoData.aspectRatio);
+    }
+    if (this.container && (this.container.classList.contains('is-vertical') || this.container.classList.contains('aspect-9-16'))) {
+      return true;
+    }
+    return !!(this.videoData && (this.videoData.isVertical || this.videoData.aspectRatio === '9:16'));
+  }
+
   isFullscreen() {
     const isNative = !!(
       (document.fullscreenElement && (document.fullscreenElement === this.container || this.container.contains(document.fullscreenElement))) ||
@@ -389,22 +407,67 @@ class CustomVideoPlayer {
     return isNative || this.container.classList.contains('is-fullscreen');
   }
 
-  enterFullscreen(direction = 'landscape-primary') {
-    if (this.isFullscreen()) {
-      this.applyOrientationLock(direction);
+  updateFullscreenIcon(isFullscreen) {
+    if (!this.btnFullscreen) return;
+    const icon = this.btnFullscreen.querySelector('svg');
+    if (!icon) return;
+    if (isFullscreen) {
+      this.btnFullscreen.title = 'Sair da Tela Cheia (F)';
+      icon.innerHTML = '<path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>';
+    } else {
+      this.btnFullscreen.title = 'Tela Cheia (F)';
+      icon.innerHTML = '<path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>';
+    }
+  }
+
+  updateFullscreenOrientation() {
+    if (!this.isFullscreen()) {
+      this.container.classList.remove('fullscreen-rotated-landscape');
       return;
     }
 
-    // iPhone Safari check (div requestFullscreen is unsupported on iPhone, but video.webkitEnterFullscreen works natively)
-    const isIPhone = /iPhone|iPod/i.test(navigator.userAgent);
-    if (isIPhone && this.video && this.video.webkitEnterFullscreen && !this.container.requestFullscreen) {
-      try {
-        this.video.webkitEnterFullscreen();
-      } catch (e) {
-        console.warn('webkitEnterFullscreen error:', e);
+    const isMobile = this.isMobileDevice();
+    const isVertical = this.isVerticalVideo();
+    const isDevicePortrait = window.innerHeight > window.innerWidth;
+
+    if (isVertical) {
+      // COM EXCEÇÃO DOS VÍDEOS VERTICAIS:
+      // se mantém verticais na tela cheia, preenchendo a tela em formato retrato.
+      this.container.classList.remove('fullscreen-rotated-landscape');
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('portrait-primary').catch(() => {
+          screen.orientation.lock('portrait').catch(() => {});
+        });
       }
+    } else {
+      // VÍDEOS HORIZONTAIS / WIDE:
+      // no mobile, ao entrar em tela cheia com o dispositivo em pé (retrato),
+      // vira automaticamente o vídeo para preencher a tela em wide.
+      if (isMobile && isDevicePortrait) {
+        this.container.classList.add('fullscreen-rotated-landscape');
+      } else {
+        this.container.classList.remove('fullscreen-rotated-landscape');
+      }
+    }
+  }
+
+  enterFullscreen(direction = 'landscape-primary') {
+    const isVertical = this.isVerticalVideo();
+    const effectiveDir = isVertical ? 'portrait-primary' : direction;
+
+    if (this.isFullscreen()) {
+      this.applyOrientationLock(effectiveDir);
+      this.updateFullscreenOrientation();
       return;
     }
+
+    const onEnterSuccess = () => {
+      this.container.classList.add('is-fullscreen');
+      document.body.classList.add('video-fullscreen-active');
+      this.applyOrientationLock(effectiveDir);
+      this.updateFullscreenOrientation();
+      this.updateFullscreenIcon(true);
+    };
 
     const req = this.container.requestFullscreen ||
                 this.container.webkitRequestFullscreen ||
@@ -415,21 +478,22 @@ class CustomVideoPlayer {
       const p = req.call(this.container);
       if (p && p.then) {
         p.then(() => {
-          this.applyOrientationLock(direction);
+          onEnterSuccess();
         }).catch(() => {
-          if (this.video && this.video.webkitEnterFullscreen) {
-            try { this.video.webkitEnterFullscreen(); } catch (e) {}
-          }
+          onEnterSuccess();
         });
       } else {
-        this.applyOrientationLock(direction);
+        onEnterSuccess();
       }
-    } else if (this.video && this.video.webkitEnterFullscreen) {
-      try { this.video.webkitEnterFullscreen(); } catch (e) {}
+    } else {
+      // Fallback para ambientes móveis sem suporte a requestFullscreen no elemento container (ex: iPhone Safari)
+      onEnterSuccess();
     }
   }
 
   exitFullscreen() {
+    this._enteredFullscreenViaRotate = false;
+
     if (document.fullscreenElement || document.webkitFullscreenElement) {
       if (document.exitFullscreen) {
         document.exitFullscreen().catch(() => {});
@@ -438,10 +502,12 @@ class CustomVideoPlayer {
       }
     }
     if (this.video && this.video.webkitDisplayingFullscreen) {
-      this.video.webkitExitFullscreen();
+      try { this.video.webkitExitFullscreen(); } catch (e) {}
     }
-    this.container.classList.remove('is-fullscreen');
+
+    this.container.classList.remove('is-fullscreen', 'fullscreen-rotated-landscape');
     document.body.classList.remove('video-fullscreen-active');
+    this.updateFullscreenIcon(false);
 
     if (screen.orientation && screen.orientation.unlock) {
       try { screen.orientation.unlock(); } catch (e) {}
@@ -453,9 +519,15 @@ class CustomVideoPlayer {
 
   toggleFullscreen() {
     if (!this.isFullscreen()) {
-      const info = this.getOrientationInfo();
-      const targetDir = info.isLandscape ? info.direction : 'landscape-primary';
-      this.enterFullscreen(targetDir);
+      this._enteredFullscreenViaRotate = false;
+      const isVertical = this.isVerticalVideo();
+      if (isVertical) {
+        this.enterFullscreen('portrait-primary');
+      } else {
+        const info = this.getOrientationInfo();
+        const targetDir = info.isLandscape ? info.direction : 'landscape-primary';
+        this.enterFullscreen(targetDir);
+      }
     } else {
       this.exitFullscreen();
     }
@@ -463,9 +535,22 @@ class CustomVideoPlayer {
 
   applyOrientationLock(direction) {
     if (screen.orientation && screen.orientation.lock) {
-      const targetLock = direction === 'landscape-secondary' ? 'landscape-secondary' : 'landscape-primary';
+      const isVertical = this.isVerticalVideo();
+      let targetLock;
+      if (isVertical || direction === 'portrait' || direction === 'portrait-primary') {
+        targetLock = 'portrait-primary';
+      } else if (direction === 'landscape-secondary') {
+        targetLock = 'landscape-secondary';
+      } else {
+        targetLock = 'landscape-primary';
+      }
+
       screen.orientation.lock(targetLock).catch(() => {
-        screen.orientation.lock('landscape').catch(() => {});
+        if (targetLock.startsWith('portrait')) {
+          screen.orientation.lock('portrait').catch(() => {});
+        } else {
+          screen.orientation.lock('landscape').catch(() => {});
+        }
       });
     }
   }
@@ -478,23 +563,40 @@ class CustomVideoPlayer {
       setTimeout(() => {
         if (!this.video) return;
         const info = this.getOrientationInfo();
+        const isVertical = this.isVerticalVideo();
 
         if (info.isLandscape) {
-          // "se estiver rodando um vídeo, e a pessoa girar o celular, o vídeo fica em tela cheia e reproduz na direção correspondente ao que o smartphone foi girado"
-          const isRunning = this.isPlaying || (!this.video.paused && !this.video.ended);
-          if (isRunning) {
-            this.enterFullscreen(info.direction);
+          // Se for vídeo wide e estiver tocando, girar celular entra em tela cheia na direção correspondente
+          if (!isVertical) {
+            const isRunning = this.isPlaying || (!this.video.paused && !this.video.ended);
+            if (isRunning && !this.isFullscreen()) {
+              this._enteredFullscreenViaRotate = true;
+              this.enterFullscreen(info.direction);
+            }
+          }
+          if (this.isFullscreen()) {
+            this.updateFullscreenOrientation();
           }
         } else {
-          // Returned to portrait: exit fullscreen
+          // Dispositivo voltou para formato retrato
           if (this.isFullscreen()) {
-            this.exitFullscreen();
+            if (isVertical) {
+              // Vídeo vertical se mantém em tela cheia no formato retrato!
+              this.updateFullscreenOrientation();
+            } else if (this._enteredFullscreenViaRotate) {
+              // Se entrou em tela cheia apenas pelo giro físico do aparelho, sai ao desvirar
+              this.exitFullscreen();
+            } else {
+              // Se entrou pelo botão de tela cheia, adapta e vira automaticamente para preencher em wide
+              this.updateFullscreenOrientation();
+            }
           }
         }
       }, 150);
     };
 
     window.addEventListener('orientationchange', this.onOrientationChange);
+    window.addEventListener('resize', this.onOrientationChange);
     if (screen.orientation) {
       screen.orientation.addEventListener('change', this.onOrientationChange);
     }
@@ -506,12 +608,13 @@ class CustomVideoPlayer {
         (this.video && this.video.webkitDisplayingFullscreen)
       );
 
-      if (!isNative) {
-        // Native fullscreen was exited (e.g. by pressing Esc or browser gesture)
+      if (!isNative && !this.container.classList.contains('is-fullscreen')) {
         this.exitFullscreen();
-      } else {
+      } else if (isNative) {
         this.container.classList.add('is-fullscreen');
         document.body.classList.add('video-fullscreen-active');
+        this.updateFullscreenOrientation();
+        this.updateFullscreenIcon(true);
       }
     };
 
@@ -521,11 +624,13 @@ class CustomVideoPlayer {
     this.video.addEventListener('webkitbeginfullscreen', () => {
       document.body.classList.add('video-fullscreen-active');
       this.container.classList.add('is-fullscreen');
+      this.updateFullscreenIcon(true);
     });
 
     this.video.addEventListener('webkitendfullscreen', () => {
       document.body.classList.remove('video-fullscreen-active');
-      this.container.classList.remove('is-fullscreen');
+      this.container.classList.remove('is-fullscreen', 'fullscreen-rotated-landscape');
+      this.updateFullscreenIcon(false);
       if (screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('portrait').catch(() => {});
       }
@@ -555,6 +660,9 @@ class CustomVideoPlayer {
               this.container.classList.add('aspect-1-1');
             }
           }
+        }
+        if (this.isFullscreen()) {
+          this.updateFullscreenOrientation();
         }
       }
     });
@@ -1106,6 +1214,7 @@ class CustomVideoPlayer {
     }
     if (this.onOrientationChange) {
       window.removeEventListener('orientationchange', this.onOrientationChange);
+      window.removeEventListener('resize', this.onOrientationChange);
       if (screen.orientation) {
         screen.orientation.removeEventListener('change', this.onOrientationChange);
       }

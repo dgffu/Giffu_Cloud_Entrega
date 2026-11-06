@@ -469,24 +469,57 @@ class CustomVideoPlayer {
       this.updateFullscreenIcon(true);
     };
 
+    // No iPhone Safari, element.requestFullscreen não existe no WebKit;
+    // a única API existente no iOS para ocultar as barras de navegação (endereço e rodapé) é video.webkitEnterFullscreen
+    const isIPhone = /iPhone|iPod/i.test(navigator.userAgent);
+    if (isIPhone && this.video && this.video.webkitEnterFullscreen && !this.container.requestFullscreen) {
+      try {
+        this.video.webkitEnterFullscreen();
+        onEnterSuccess();
+        return;
+      } catch (e) {
+        console.warn('webkitEnterFullscreen error:', e);
+      }
+    }
+
+    // Android / iPad / Desktop: utiliza Fullscreen API com { navigationUI: 'hide' } para ocultar as barras de navegação do browser
+    const fsOptions = { navigationUI: 'hide' };
     const req = this.container.requestFullscreen ||
                 this.container.webkitRequestFullscreen ||
                 this.container.mozRequestFullScreen ||
                 this.container.msRequestFullscreen;
 
     if (req) {
-      const p = req.call(this.container);
+      let p;
+      try {
+        p = req.call(this.container, fsOptions);
+      } catch (err) {
+        try {
+          p = req.call(this.container);
+        } catch (e2) {}
+      }
+
       if (p && p.then) {
         p.then(() => {
           onEnterSuccess();
         }).catch(() => {
+          // Fallback caso container requestFullscreen seja rejeitado: tentar no elemento de vídeo
+          if (this.video && this.video.requestFullscreen) {
+            try { this.video.requestFullscreen(fsOptions); } catch (e) {}
+          } else if (this.video && this.video.webkitEnterFullscreen) {
+            try { this.video.webkitEnterFullscreen(); } catch (e) {}
+          }
           onEnterSuccess();
         });
       } else {
         onEnterSuccess();
       }
+    } else if (this.video && this.video.webkitEnterFullscreen) {
+      try {
+        this.video.webkitEnterFullscreen();
+      } catch (e) {}
+      onEnterSuccess();
     } else {
-      // Fallback para ambientes móveis sem suporte a requestFullscreen no elemento container (ex: iPhone Safari)
       onEnterSuccess();
     }
   }

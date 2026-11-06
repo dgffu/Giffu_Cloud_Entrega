@@ -943,6 +943,45 @@
         </div>
       </div>
 
+      <!-- + Diretório (Abre menu de criar/espelhar diretório) -->
+      <button type="button" class="ctx-item" id="ctxBtnAddDirectory" role="menuitem" style="display: none;">
+        <div class="ctx-item-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            <line x1="12" y1="11" x2="12" y2="17"></line>
+            <line x1="9" y1="14" x2="15" y2="14"></line>
+          </svg>
+          <span>+ Diretório</span>
+        </div>
+      </button>
+
+      <!-- + Divisão (Abre menu de criar divisão/subdivisão) -->
+      <button type="button" class="ctx-item" id="ctxBtnAddDivision" role="menuitem" style="display: none;">
+        <div class="ctx-item-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="12" y1="8" x2="12" y2="16"></line>
+            <line x1="8" y1="12" x2="16" y2="12"></line>
+          </svg>
+          <span>+ Divisão</span>
+        </div>
+      </button>
+
+      <!-- + Upload (Envia arquivos para o Drive na pasta/diretório selecionado) -->
+      <button type="button" class="ctx-item" id="ctxBtnAddUpload" role="menuitem" style="display: none;">
+        <div class="ctx-item-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span>+ Upload</span>
+        </div>
+      </button>
+
+      <!-- Input de upload de arquivos acionado via menu de contexto -->
+      <input type="file" id="ctxInputUpload" multiple style="display: none;" />
+
       <!-- 2. EDITAR -->
       <button type="button" class="ctx-item" id="ctxBtnEdit" role="menuitem">
         <div class="ctx-item-left">

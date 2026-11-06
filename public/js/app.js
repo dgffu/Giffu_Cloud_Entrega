@@ -9584,11 +9584,11 @@ class EntregaApp {
     modal.classList.add('open');
   }
 
-  async handleFilesUpload(files, targetFolderId, targetFolderName) {
+  async handleFilesUpload(files, targetFolderId, targetFolderName, optionalProj = null) {
     if (!files || files.length === 0) return;
     if (this.isClientMode) return; // Strict safety guarantee
 
-    const proj = this.selectedProject;
+    const proj = optionalProj || this.selectedProject;
     if (!proj) return;
 
     const fileList = Array.from(files);
@@ -9703,6 +9703,12 @@ class EntregaApp {
           ? `Arquivo "${successfulItems[0].title}" enviado com sucesso para o Google Drive!`
           : `${successfulItems.length} arquivos enviados com sucesso para o Google Drive!`
       );
+      try {
+        await this.fetchData();
+        if (this.selectedProject && proj && this.selectedProject.id === proj.id) {
+          this.selectedProject = (this.data.projects || []).find(p => p.id === proj.id) || null;
+        }
+      } catch (_) {}
       this.render();
     }
   }
@@ -9949,12 +9955,12 @@ class EntregaApp {
     modal.classList.add('open');
   }
 
-  openAddDirectoryModal() {
+  openAddDirectoryModal(defaultCat = null, defaultDiv = null) {
     const modal = document.getElementById('modalAddDirectory');
     if (!modal) return;
 
-    const defaultCat = this.getActiveCategoryName();
-    this.populateCategorySelects(defaultCat);
+    const defaultCategory = defaultCat || this.getActiveCategoryName();
+    this.populateCategorySelects(defaultCategory, null, defaultDiv, null);
     this.updateBrandElements();
 
     const inputName = document.getElementById('newProjName');
@@ -10578,6 +10584,94 @@ class EntregaApp {
       });
     });
 
+    // Action: + Diretório (Abre menu normal de criar/espelhar diretório)
+    const btnAddDirectory = document.getElementById('ctxBtnAddDirectory');
+    btnAddDirectory?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = this.activeUniversalContextItem;
+      this.closeUniversalContextMenu();
+      if (!item) return;
+
+      if (item.type === 'division') {
+        const div = item.item;
+        this.openAddDirectoryModal(div?.category || null, div?.id || null);
+      } else if (item.type === 'category') {
+        this.openAddDirectoryModal(item.name || null, null);
+      } else {
+        this.openAddDirectoryModal();
+      }
+    });
+
+    // Action: + Divisão (Abre menu normal de criar divisão ou subdivisão)
+    const btnAddDivision = document.getElementById('ctxBtnAddDivision');
+    btnAddDivision?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = this.activeUniversalContextItem;
+      this.closeUniversalContextMenu();
+      if (!item) return;
+
+      if (item.type === 'division') {
+        const div = item.item;
+        // Ao clicar com o direito em divisões/subdivisões: + Divisão (parar criar uma subdivisão — abre menu normal de criar divisão)
+        this.openAddDivisionModal(div?.category || null, div?.id || null);
+      } else if (item.type === 'project') {
+        const proj = item.item;
+        // Ao clicar com o direito em diretórios: + Divisão (abre menu normal de criar divisão)
+        this.openAddDivisionModal(proj?.category || null, proj?.divisionId || null);
+      } else if (item.type === 'category') {
+        this.openAddDivisionModal(item.name || null, null);
+      } else {
+        this.openAddDivisionModal();
+      }
+    });
+
+    // Action: + Upload (Envia arquivos para o drive como dentro dos diretórios já faz)
+    const btnAddUpload = document.getElementById('ctxBtnAddUpload');
+    const ctxInputUpload = document.getElementById('ctxInputUpload');
+
+    btnAddUpload?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = this.activeUniversalContextItem;
+      this.closeUniversalContextMenu();
+      if (!item) return;
+
+      let targetFolderId = null;
+      let targetFolderName = null;
+      let targetProj = null;
+
+      if (item.type === 'project') {
+        targetProj = item.item;
+        targetFolderId = item.item?.driveFolderId;
+        targetFolderName = item.item?.name;
+      } else if (item.type === 'folder') {
+        targetProj = item.project || (this.data?.projects || []).find(p => p.id === item.projectId) || this.selectedProject;
+        targetFolderId = item.item?.id || item.item?.driveFolderId;
+        targetFolderName = item.item?.name;
+      }
+
+      if (!targetProj || !targetFolderId) {
+        window.showToast('Pasta de destino não encontrada para upload', 'error');
+        return;
+      }
+
+      this._pendingCtxUpload = {
+        targetFolderId,
+        targetFolderName,
+        project: targetProj
+      };
+
+      ctxInputUpload?.click();
+    });
+
+    ctxInputUpload?.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0 && this._pendingCtxUpload) {
+        const { targetFolderId, targetFolderName, project } = this._pendingCtxUpload;
+        this.handleFilesUpload(e.target.files, targetFolderId, targetFolderName, project);
+        this._pendingCtxUpload = null;
+        e.target.value = '';
+      }
+    });
+
     // Action 2: Editar (Abre janela padrão do elemento)
     const btnEdit = document.getElementById('ctxBtnEdit');
     btnEdit?.addEventListener('click', (e) => {
@@ -10772,6 +10866,33 @@ class EntregaApp {
     if (titleEl) titleEl.textContent = ctxItem.title;
     if (iconWrap) iconWrap.innerHTML = iconSvg;
     if (colorDot) colorDot.style.backgroundColor = curColor;
+
+    // Ações de Adicionar abaixo de "Cor":
+    const btnAddDirectory = document.getElementById('ctxBtnAddDirectory');
+    const btnAddDivision = document.getElementById('ctxBtnAddDivision');
+    const btnAddUpload = document.getElementById('ctxBtnAddUpload');
+    const isAuthor = !this.isClientMode;
+
+    if (btnAddDirectory) {
+      // Ao clicar com o direito em divisões/subdivisões: + Diretório (abre menu normal de criar/espelhar diretório)
+      const showDir = isAuthor && (ctxItem.type === 'division' || ctxItem.type === 'category');
+      btnAddDirectory.style.display = showDir ? 'flex' : 'none';
+    }
+
+    if (btnAddDivision) {
+      // Ao clicar com o direito em diretórios: + Divisão (abre menu normal de criar divisão)
+      // Ao clicar com o direito em divisões/subdivisões: + Divisão (parar criar uma subdivisão — abre menu normal de criar divisão)
+      const showDiv = isAuthor && (ctxItem.type === 'project' || ctxItem.type === 'division' || ctxItem.type === 'category');
+      btnAddDivision.style.display = showDiv ? 'flex' : 'none';
+    }
+
+    if (btnAddUpload) {
+      // Ao clicar com o direito em Diretório: + Upload (opção normal de enviar arquivos para o drive como dentro dos diretórios já faz)
+      // Ao clicar com o direito em pastas e subpastas: + Upload (opção normal de enviar arquivos para o drive como dentro dos diretórios já faz)
+      // Ao clicar com o direito em arquivos, não há opção de adicionar
+      const showUpload = isAuthor && (ctxItem.type === 'project' || ctxItem.type === 'folder');
+      btnAddUpload.style.display = showUpload ? 'flex' : 'none';
+    }
 
     // Copiar Link: Visível para itens que podem compartilhar o link (diretório, pasta, arquivo)
     const btnCopyLink = document.getElementById('ctxBtnCopyLink');

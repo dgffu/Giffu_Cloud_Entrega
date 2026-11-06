@@ -540,63 +540,59 @@ async function streamFile(req, res, readDB, fileId, { download = false, fileName
   const ua = String(req.headers['user-agent'] || '');
   const isMobileUa = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
 
-  //No Mobile (iOS Safari / Android Chrome):
-  // Navegadores mobile abortam streams gigantes de 385MB para poupar RAM, o que quebrava o Keep-Alive.
-  // Usamos blocos de 8MB alinhados + Read-Ahead Prefetch em RAM do bloco seguinte (0ms de espera no próximo chunk).
+  // No Mobile (iOS Safari / Android Chrome):
+  // Trata probes iniciais e blocos delimitados via RAM cache instantâneo.
+  // Para ranges abertos (bytes=X-), mantém stream contínuo sem corte artificial de 8MB,
+  // evitando descontinuidade de chunks que causa queda e muting na trilha de áudio do decodificador (AudioRenderer).
   if (!download && isMobileUa && rawRange) {
     const rangeMatch = rawRange.match(/^bytes=(\d+)-(\d+)?$/i);
     if (rangeMatch) {
       const start = parseInt(rangeMatch[1], 10);
       const clientEnd = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : null;
-      const blockIdx = Math.floor(start / MOBILE_BLOCK_SIZE);
-      const blockStart = blockIdx * MOBILE_BLOCK_SIZE;
-      const blockEnd = blockStart + MOBILE_BLOCK_SIZE - 1;
-      const blockKey = `${fileId}:${blockStart}`;
 
-      pruneMobileBlockCache();
+      // Se o cliente solicitou um range com fim delimitado (ex: probes de 2 bytes, 1MB, etc)
+      if (clientEnd !== null && (clientEnd - start) < MOBILE_BLOCK_SIZE) {
+        const blockIdx = Math.floor(start / MOBILE_BLOCK_SIZE);
+        const blockStart = blockIdx * MOBILE_BLOCK_SIZE;
+        const blockKey = `${fileId}:${blockStart}`;
 
-      // Se o bloco já estiver em RAM (ou terminando de chegar via prefetch), entrega em 0ms direto da RAM!
-      let cachedEntry = mobileBlockCache.get(blockKey);
-      if (!cachedEntry && mobileInflightBlocks.has(blockKey)) {
-        cachedEntry = await mobileInflightBlocks.get(blockKey);
-      }
+        pruneMobileBlockCache();
 
-      if (cachedEntry && start >= cachedEntry.start && start <= cachedEntry.end) {
-        cachedEntry.ts = Date.now();
-        const actualEnd = clientEnd !== null
-          ? Math.min(clientEnd, cachedEntry.end)
-          : cachedEntry.end;
-        const sliceStart = start - cachedEntry.start;
-        const sliceEnd = actualEnd - cachedEntry.start + 1;
-        const slice = cachedEntry.buffer.subarray(sliceStart, sliceEnd);
-
-        // Dispara prefetch assíncrono do próximo bloco de 8MB em RAM enquanto o celular reproduz este
-        const nextBlockStart = (blockIdx + 1) * MOBILE_BLOCK_SIZE;
-        if (nextBlockStart < cachedEntry.totalSize) {
-          prefetchDriveBlockToRam(token, fileId, nextBlockStart, cachedEntry.totalSize);
+        let cachedEntry = mobileBlockCache.get(blockKey);
+        if (!cachedEntry && mobileInflightBlocks.has(blockKey)) {
+          cachedEntry = await mobileInflightBlocks.get(blockKey);
         }
 
-        res.writeHead(206, {
-          'Content-Type': mimeType || cachedEntry.contentType || 'video/mp4',
-          'Accept-Ranges': 'bytes',
-          'Content-Range': `bytes ${start}-${actualEnd}/${cachedEntry.totalSize}`,
-          'Content-Length': slice.length,
-          'Cache-Control': 'private, max-age=3600',
-          'Content-Disposition': 'inline'
-        });
-        return res.end(slice);
-      }
+        if (cachedEntry && start >= cachedEntry.start && start <= cachedEntry.end) {
+          cachedEntry.ts = Date.now();
+          const actualEnd = Math.min(clientEnd, cachedEntry.end);
+          const sliceStart = start - cachedEntry.start;
+          const sliceEnd = actualEnd - cachedEntry.start + 1;
+          const slice = cachedEntry.buffer.subarray(sliceStart, sliceEnd);
 
-      // Se ainda não está em RAM: limita o range deste request ao fim do bloco de 8MB para preservar o Keep-Alive TLS
-      const targetEnd = (clientEnd !== null && clientEnd < blockEnd) ? clientEnd : blockEnd;
-      headers.Range = `bytes=${start}-${targetEnd}`;
+          // Dispara prefetch assíncrono do próximo bloco em RAM
+          const nextBlockStart = (blockIdx + 1) * MOBILE_BLOCK_SIZE;
+          if (nextBlockStart < cachedEntry.totalSize) {
+            prefetchDriveBlockToRam(token, fileId, nextBlockStart, cachedEntry.totalSize);
+          }
 
-      // Se não for apenas o probe de 2 bytes (bytes=0-1 do Safari), já dispara prefetch do próximo bloco (ou do bloco 0)
-      if (clientEnd !== null && (clientEnd - start) <= 4) {
-        prefetchDriveBlockToRam(token, fileId, 0);
+          res.writeHead(206, {
+            'Content-Type': mimeType || cachedEntry.contentType || 'video/mp4',
+            'Accept-Ranges': 'bytes',
+            'Content-Range': `bytes ${start}-${actualEnd}/${cachedEntry.totalSize}`,
+            'Content-Length': slice.length,
+            'Cache-Control': 'private, max-age=3600',
+            'Content-Disposition': 'inline'
+          });
+          return res.end(slice);
+        }
+
+        // Se delimitado mas ainda não em RAM, pede exatamente o intervalo solicitado
+        headers.Range = `bytes=${start}-${clientEnd}`;
       } else {
-        const nextBlockStart = (blockIdx + 1) * MOBILE_BLOCK_SIZE;
-        prefetchDriveBlockToRam(token, fileId, nextBlockStart);
+        // Range aberto para streaming (bytes=start-): mantém o fluxo contínuo do arquivo sem truncamento
+        // preservando o alinhamento de pacotes multiplexados de áudio e vídeo
+        headers.Range = clientEnd !== null ? `bytes=${start}-${clientEnd}` : `bytes=${start}-`;
       }
     } else {
       headers.Range = rawRange;

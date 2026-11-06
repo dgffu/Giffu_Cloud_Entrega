@@ -26,6 +26,20 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="manifest" href="/manifest.json">
+  <script>
+    // Early capture of PWA installation prompt for Android / Chromium
+    window._deferredPwaPrompt = null;
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      window._deferredPwaPrompt = e;
+    });
+    // Immediate Service Worker registration
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(err) {
+        console.warn('SW register warn:', err);
+      });
+    }
+  </script>
   <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="/css/player.css">
   <link rel="stylesheet" href="/css/annotation.css">
@@ -950,6 +964,7 @@
       <div class="modal-footer" style="padding-top: 10px;">
         <button type="button" class="btn-primary" id="btnDismissIosWebappGuide" style="width: 100%; border-radius: 9999px; font-weight: 700; background: #FF5400;">Entendi</button>
       </div>
+      <div class="ios-pointer-down-arrow" id="iosPointerDownArrow" aria-hidden="true"></div>
     </div>
   </div>
   <!-- Context Menu for Category Colors (Right-Click) -->

@@ -1601,6 +1601,9 @@ class EntregaApp {
     if (isStandalone) {
       document.documentElement.classList.add('is-pwa-standalone');
       try {
+        localStorage.setItem('giffu_pwa_installed', 'true');
+      } catch (e) {}
+      try {
         const targetUrl = localStorage.getItem('giffu_pwa_target_url');
         if (targetUrl) {
           const u = new URL(targetUrl, window.location.origin);
@@ -1619,17 +1622,23 @@ class EntregaApp {
     return false;
   }
 
-  setupPwaInstallSupport() {
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch((err) => {
-          console.warn('SW registration failed:', err);
-        });
-      });
-    }
+  getMobilePlatform() {
+    const ua = navigator.userAgent || '';
+    const isIPad = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua));
+    const isIPhone = /iPhone|iPod/i.test(ua);
+    const isIOS = isIPhone || isIPad;
+    const isAndroid = /Android/i.test(ua);
+    const isChromeIOS = isIOS && /CriOS/i.test(ua);
+    const isSafariIOS = isIOS && !isChromeIOS;
+    const isMobile = isIOS || isAndroid || (navigator.maxTouchPoints > 0) || ('ontouchstart' in window);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    return { isMobile, isIOS, isIPhone, isIPad, isAndroid, isChromeIOS, isSafariIOS, isStandalone };
+  }
 
+  setupPwaInstallSupport() {
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
+      window._deferredPwaPrompt = e;
       this.deferredPwaPrompt = e;
     });
 
@@ -1673,55 +1682,137 @@ class EntregaApp {
 
   checkMobileWebAppPrompt(vid) {
     if (!vid) return;
-    const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (!isMobile) return;
-
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-    if (isStandalone) return;
+    const platform = this.getMobilePlatform();
+    if (!platform.isMobile) return;
+    if (platform.isStandalone) return;
 
     if (sessionStorage.getItem('giffu_pwa_prompt_dismissed') === 'true') return;
 
     const promptEl = document.getElementById('mobileWebAppPrompt');
-    if (promptEl) {
-      promptEl.style.display = 'block';
+    if (!promptEl) return;
+
+    const isInstalled = localStorage.getItem('giffu_pwa_installed') === 'true';
+    const titleEl = promptEl.querySelector('.mobile-webapp-title');
+    const descEl = promptEl.querySelector('.mobile-webapp-desc');
+    const btnYes = promptEl.querySelector('#btnWebappPromptYes');
+    const btnNo = promptEl.querySelector('#btnWebappPromptNo');
+
+    if (isInstalled) {
+      if (titleEl) titleEl.textContent = 'Assistir no Web App Giffú Cloud';
+      if (descEl) descEl.textContent = 'Toque em Abrir para tela cheia sem a barra do navegador';
+      if (btnYes) btnYes.textContent = 'Abrir';
+      if (btnNo) btnNo.textContent = 'Navegador';
+    } else {
+      if (titleEl) titleEl.textContent = 'Abrir no Web App';
+      if (descEl) descEl.textContent = 'Adicione à tela inicial para tela cheia sem barras';
+      if (btnYes) btnYes.textContent = 'Sim';
+      if (btnNo) btnNo.textContent = 'Não';
     }
+
+    promptEl.style.display = 'block';
   }
 
   async triggerWebAppInstall() {
+    const currentUrl = window.location.href;
+    const isAlreadyInstalled = localStorage.getItem('giffu_pwa_installed') === 'true';
     try {
-      localStorage.setItem('giffu_pwa_target_url', window.location.href);
+      localStorage.setItem('giffu_pwa_target_url', currentUrl);
+      localStorage.setItem('giffu_pwa_installed', 'true');
     } catch (e) {}
 
     const promptEl = document.getElementById('mobileWebAppPrompt');
     if (promptEl) promptEl.style.display = 'none';
 
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    if (isIOS) {
-      const modalIos = document.getElementById('modalIosWebappGuide');
-      if (modalIos) {
-        modalIos.style.display = 'flex';
+    const platform = this.getMobilePlatform();
+
+    // Se o usuário já instalou o atalho anteriormente
+    if (isAlreadyInstalled) {
+      if (window.showToast) {
+        window.showToast('Vídeo salvo! Abra o atalho "Giffú Cloud" na tela de início.');
       }
       return;
     }
 
-    // Android / Chromium
-    if (this.deferredPwaPrompt) {
-      try {
-        this.deferredPwaPrompt.prompt();
-        const choice = await this.deferredPwaPrompt.userChoice;
-        if (choice && choice.outcome === 'accepted') {
-          if (window.showToast) window.showToast('Web App adicionado com sucesso!');
+    // 1. Android / Chromium
+    if (platform.isAndroid) {
+      const promptEvent = window._deferredPwaPrompt || this.deferredPwaPrompt;
+      if (promptEvent) {
+        try {
+          promptEvent.prompt();
+          const choice = await promptEvent.userChoice;
+          if (choice && choice.outcome === 'accepted') {
+            if (window.showToast) window.showToast('Giffú Cloud adicionado à tela inicial!');
+          }
+        } catch (err) {
+          console.warn('Erro ao acionar prompt PWA:', err);
+        } finally {
+          window._deferredPwaPrompt = null;
+          this.deferredPwaPrompt = null;
         }
-      } catch (err) {
-        console.warn('Erro ao acionar prompt PWA:', err);
-      } finally {
-        this.deferredPwaPrompt = null;
+        return;
       }
-    } else {
       if (window.showToast) {
-        window.showToast('Toque no menu (⋮) do navegador e selecione "Adicionar à tela inicial" ou "Instalar app"');
+        window.showToast('Toque no menu (⋮) do Chrome e selecione "Adicionar à tela inicial" ou "Instalar app"');
       }
+      return;
     }
+
+    // 2. iOS / iPadOS
+    if (platform.isIOS) {
+      this.showIosInstallGuide(platform);
+      return;
+    }
+
+    // Outros sistemas
+    const promptEvent = window._deferredPwaPrompt || this.deferredPwaPrompt;
+    if (promptEvent) {
+      try {
+        promptEvent.prompt();
+      } catch (e) {}
+    } else if (window.showToast) {
+      window.showToast('Adicione à tela inicial pelo menu do seu navegador');
+    }
+  }
+
+  showIosInstallGuide(platform) {
+    const modalIos = document.getElementById('modalIosWebappGuide');
+    if (!modalIos) return;
+
+    const titleEl = modalIos.querySelector('.modal-title');
+    const descEl = modalIos.querySelector('.modal-body p');
+    const step1El = modalIos.querySelector('.webapp-guide-steps .webapp-guide-step:nth-child(1) .webapp-step-content');
+
+    if (platform.isIPad) {
+      if (titleEl) titleEl.textContent = 'Adicionar ao iPad';
+      if (descEl) descEl.textContent = 'Instale o Web App no seu iPad para assistir vídeos com tela cheia real e sem a barra do navegador.';
+      if (step1El) {
+        step1El.innerHTML = `Toque no botão <strong>Compartilhar</strong>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF5400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin: 0 4px;">
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+            <polyline points="16 6 12 2 8 6"></polyline>
+            <line x1="12" y1="2" x2="12" y2="15"></line>
+          </svg>
+          na <strong>barra superior</strong> do Safari.`;
+      }
+      modalIos.classList.remove('is-iphone-bottom');
+      modalIos.classList.add('is-ipad-top');
+    } else {
+      if (titleEl) titleEl.textContent = 'Adicionar ao iPhone';
+      if (descEl) descEl.textContent = 'Instale o Web App no seu iPhone para assistir vídeos com tela cheia real e sem a barra do navegador.';
+      if (step1El) {
+        step1El.innerHTML = `Toque no botão <strong>Compartilhar</strong>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF5400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin: 0 4px;">
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+            <polyline points="16 6 12 2 8 6"></polyline>
+            <line x1="12" y1="2" x2="12" y2="15"></line>
+          </svg>
+          na <strong>barra inferior</strong> do Safari.`;
+      }
+      modalIos.classList.add('is-iphone-bottom');
+      modalIos.classList.remove('is-ipad-top');
+    }
+
+    modalIos.style.display = 'flex';
   }
 
   async init() {

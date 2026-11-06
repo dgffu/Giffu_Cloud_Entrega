@@ -1,7 +1,7 @@
 {
   "id": "/",
   "name": "Giffú Cloud",
-  "short_name": "Giffú",
+  "short_name": "Giffú Cloud",
   "description": "Streaming de alta qualidade de conteúdo direto da nuvem.",
   "start_url": "/",
   "scope": "/",

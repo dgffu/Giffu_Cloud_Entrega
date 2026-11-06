@@ -444,34 +444,27 @@ async function streamFile(req, res, readDB, fileId, { download = false, fileName
   const headers = { Authorization: `Bearer ${token}` };
   const rawRange = req.headers.range;
 
+  // Solução A: Stream contínuo aberto (Open-Ended HTTP 206) sem corte artificial de blocos.
+  // Repassa o Range nativo solicitado pelo navegador diretamente ao Google Drive, permitindo que
+  // a janela TCP escale até a banda máxima sem interromper a conexão a cada poucos segundos.
   if (rawRange) {
-    if (download) {
-      headers.Range = rawRange;
-    } else {
-      // Para streaming/reprodução de mídia: chunk adaptativo de alto desempenho
-      // Chunk inicial (start = 0): 8 MB (playback em < 250ms com 3.5s de buffer imediato)
-      // Chunks subsequentes (start > 0): 16 MB (7-8s de runway contínuo, zero buffer underrun)
-      const rangeMatch = rawRange.match(/^bytes=(\d+)-(\d+)?$/i);
-      if (rangeMatch) {
-        const start = parseInt(rangeMatch[1], 10);
-        const clientEnd = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : null;
-        const STREAM_CHUNK_SIZE = start === 0 ? (8 * 1024 * 1024) : (16 * 1024 * 1024);
-        if (clientEnd !== null && (clientEnd - start + 1) <= STREAM_CHUNK_SIZE) {
-          headers.Range = `bytes=${start}-${clientEnd}`;
-        } else {
-          const clampedEnd = start + STREAM_CHUNK_SIZE - 1;
-          headers.Range = `bytes=${start}-${clampedEnd}`;
-        }
-      } else {
-        headers.Range = rawRange;
-      }
-    }
+    headers.Range = rawRange;
+  }
+
+  if (req.socket && typeof req.socket.setNoDelay === 'function') {
+    req.socket.setNoDelay(true);
+  }
+  if (res.socket && typeof res.socket.setNoDelay === 'function') {
+    res.socket.setNoDelay(true);
   }
 
   const upstream = https.request(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
-    { method: 'GET', headers, timeout: 30000 },
+    { method: 'GET', headers, timeout: 120000, agent: google.keepAliveAgent },
     (ures) => {
+      if (ures.socket && typeof ures.socket.setNoDelay === 'function') {
+        ures.socket.setNoDelay(true);
+      }
       const status = ures.statusCode;
 
       if (status === 416) {
@@ -580,7 +573,7 @@ async function getFileStream(readDB, fileId) {
   return new Promise((resolve, reject) => {
     const upstream = https.request(
       `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
-      { method: 'GET', headers, timeout: 60000 },
+      { method: 'GET', headers, timeout: 60000, agent: google.keepAliveAgent },
       (ures) => {
         if (ures.statusCode !== 200 && ures.statusCode !== 206) {
           ures.resume();

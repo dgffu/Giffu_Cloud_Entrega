@@ -41,6 +41,7 @@ function ensureDirectories() {
 // ---------- Criptografia em Repouso (AES-256-GCM) ----------
 let cachedMasterKey = null;
 const fileCache = new Map(); // filePath -> { mtimeMs, jsonStr }
+const driveIdLookupCache = new Map(); // driveFileId -> { result, expiresAt }
 
 function getMasterKey() {
   if (cachedMasterKey) return cachedMasterKey;
@@ -115,6 +116,7 @@ function decryptPayload(envelope, customKey = null) {
 
 function writeJsonFileSecure(filePath, data) {
   ensureDirectories();
+  driveIdLookupCache.clear();
   const jsonStr = JSON.stringify(data);
   const envelope = encryptPayload(data);
   const serializedEnvelope = JSON.stringify(envelope, null, 2);
@@ -968,6 +970,12 @@ function findUserByProjectId(projectId) {
 // Busca qual usuário/projeto possui um vídeo do Google Drive (para streaming)
 function findVideoByDriveId(driveFileId) {
   if (!driveFileId) return null;
+  const now = Date.now();
+  const cached = driveIdLookupCache.get(driveFileId);
+  if (cached && cached.expiresAt > now) {
+    return cached.result;
+  }
+
   ensureDirectories();
   try {
     const files = fs.readdirSync(USERS_DIR).filter(f => f.endsWith('.json'));
@@ -980,7 +988,9 @@ function findVideoByDriveId(driveFileId) {
           for (const vid of proj.videos || []) {
             if (vid.driveFileId === driveFileId) {
               const userId = (userDb.user && userDb.user.id) || f.replace('.json', '');
-              return { video: vid, project: proj, userDb, userId };
+              const result = { video: vid, project: proj, userDb, userId };
+              driveIdLookupCache.set(driveFileId, { result, expiresAt: now + 15000 });
+              return result;
             }
           }
         }

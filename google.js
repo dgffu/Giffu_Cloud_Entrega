@@ -18,6 +18,18 @@ const TOKENS_FILE = path.join(CONFIG_DIR, 'drive_tokens.json');
 const SCOPE_BASIC = 'openid email profile';
 const SCOPE_DRIVE = 'https://www.googleapis.com/auth/drive';
 
+// Agente HTTPS persistente com Keep-Alive para eliminar handshakes TLS repetidos no streaming do Drive
+const keepAliveAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 128,
+  maxFreeSockets: 32,
+  timeout: 60000
+});
+
+// Cache em memória RAM para acesso instantâneo (0ms) ao token durante streaming/ranges
+const tokenRamCache = new Map(); // key -> { access_token, expiry_date }
+
 function ensureDir() {
   fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
 }
@@ -26,7 +38,7 @@ function ensureDir() {
 function request(urlString, { method = 'GET', headers = {}, body = null, timeout = 15000 } = {}) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlString);
-    const req = https.request(url, { method, headers, timeout }, (res) => {
+    const req = https.request(url, { method, headers, timeout, agent: keepAliveAgent }, (res) => {
       const chunks = [];
       let size = 0;
       res.on('data', (c) => {
@@ -93,15 +105,20 @@ function readTokens() {
 
 function writeTokens(tokens) {
   ensureDir();
+  if (tokens && tokens.access_token && tokens.expiry_date) {
+    tokenRamCache.set('__global__', { access_token: tokens.access_token, expiry_date: tokens.expiry_date });
+  }
   fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
   try { fs.chmodSync(TOKENS_FILE, 0o600); } catch (e) {}
 }
 
 function clearTokens() {
+  tokenRamCache.delete('__global__');
   try { fs.unlinkSync(TOKENS_FILE); } catch (e) {}
 }
 
 async function revokeToken(token) {
+  tokenRamCache.clear();
   try {
     await postForm('https://oauth2.googleapis.com/revoke', { token });
   } catch (e) {}
@@ -112,6 +129,29 @@ const userRefreshLocks = new Map();
 let globalRefreshing = null;
 
 async function getDriveAccessToken(userContext) {
+  const now = Date.now();
+
+  // Fast-path em memória RAM (evita leitura/parse de banco a cada chunk de vídeo)
+  if (typeof userContext === 'string' && userContext) {
+    const cached = tokenRamCache.get(userContext);
+    if (cached && cached.access_token && cached.expiry_date - 60000 > now) {
+      return cached.access_token;
+    }
+  } else if (userContext && typeof userContext === 'object') {
+    const uid = (userContext.user && userContext.user.id) || null;
+    if (uid) {
+      const cached = tokenRamCache.get(uid);
+      if (cached && cached.access_token && cached.expiry_date - 60000 > now) {
+        return cached.access_token;
+      }
+    }
+  } else if (!userContext) {
+    const cached = tokenRamCache.get('__global__');
+    if (cached && cached.access_token && cached.expiry_date - 60000 > now) {
+      return cached.access_token;
+    }
+  }
+
   const storage = require('./storage');
   let userDb = null;
   let userId = null;
@@ -132,7 +172,8 @@ async function getDriveAccessToken(userContext) {
     const tokens = userDb.driveTokens;
 
     // Token ainda válido?
-    if (tokens.access_token && tokens.expiry_date && tokens.expiry_date - 60 * 1000 > Date.now()) {
+    if (tokens.access_token && tokens.expiry_date && tokens.expiry_date - 60 * 1000 > now) {
+      if (userId) tokenRamCache.set(userId, { access_token: tokens.access_token, expiry_date: tokens.expiry_date });
       return tokens.access_token;
     }
 
@@ -157,7 +198,10 @@ async function getDriveAccessToken(userContext) {
         if (res.status !== 200 || !res.json || !res.json.access_token) {
           if (res.json && res.json.error === 'invalid_grant') {
             userDb.driveTokens = null;
-            if (userId) storage.saveUserDb(userId, userDb);
+            if (userId) {
+              tokenRamCache.delete(userId);
+              storage.saveUserDb(userId, userDb);
+            }
             const err = new Error('O acesso ao Drive foi revogado. Faça login com Google novamente.');
             err.code = 'DRIVE_NOT_CONNECTED';
             throw err;
@@ -172,7 +216,10 @@ async function getDriveAccessToken(userContext) {
         };
 
         userDb.driveTokens = updatedTokens;
-        if (userId) storage.saveUserDb(userId, userDb);
+        if (userId) {
+          tokenRamCache.set(userId, { access_token: updatedTokens.access_token, expiry_date: updatedTokens.expiry_date });
+          storage.saveUserDb(userId, userDb);
+        }
         return updatedTokens.access_token;
       })().finally(() => {
         userRefreshLocks.delete(lockKey);
@@ -198,7 +245,8 @@ async function getDriveAccessToken(userContext) {
     throw err;
   }
 
-  if (tokens.access_token && tokens.expiry_date && tokens.expiry_date - 60 * 1000 > Date.now()) {
+  if (tokens.access_token && tokens.expiry_date && tokens.expiry_date - 60 * 1000 > now) {
+    tokenRamCache.set('__global__', { access_token: tokens.access_token, expiry_date: tokens.expiry_date });
     return tokens.access_token;
   }
 
@@ -240,6 +288,7 @@ async function getDriveAccessToken(userContext) {
 module.exports = {
   SCOPE_BASIC,
   SCOPE_DRIVE,
+  keepAliveAgent,
   request,
   postForm,
   getOAuthConfig,

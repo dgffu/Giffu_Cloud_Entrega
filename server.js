@@ -3024,7 +3024,10 @@ function streamLocalRangeFile(req, res, filePath, customContentType = null, cust
     }
 
     const chunksize = (end - start) + 1;
-    const file = fs.createReadStream(filePath, { start, end });
+    if (res.socket && typeof res.socket.setNoDelay === 'function') {
+      res.socket.setNoDelay(true);
+    }
+    const file = fs.createReadStream(filePath, { start, end, highWaterMark: 1024 * 1024 });
     onStreamError(file);
     req.on('close', () => file.destroy());
 
@@ -3037,13 +3040,16 @@ function streamLocalRangeFile(req, res, filePath, customContentType = null, cust
     });
     file.pipe(res);
   } else {
+    if (res.socket && typeof res.socket.setNoDelay === 'function') {
+      res.socket.setNoDelay(true);
+    }
     res.writeHead(200, {
       'Content-Length': fileSize,
       'Content-Type': contentType,
       'Accept-Ranges': 'bytes',
       'Content-Disposition': disposition
     });
-    const file = fs.createReadStream(filePath);
+    const file = fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
     onStreamError(file);
     req.on('close', () => file.destroy());
     file.pipe(res);
@@ -3208,10 +3214,6 @@ app.get('/api/stream/alpha-status', async (req, res) => {
 app.get('/api/stream/video-status', async (req, res) => {
   if (req.query.drive) {
     const fileId = String(req.query.drive);
-    const fastStartPath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}_faststart.mp4`);
-    if (fs.existsSync(fastStartPath) && fs.statSync(fastStartPath).size > 0) {
-      return res.json({ ready: true, converting: false, needsTranscode: true, isFastStart: true });
-    }
     const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
     if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
       return res.json({ ready: true, converting: false, needsTranscode: true });
@@ -3252,10 +3254,6 @@ app.get('/api/stream/video-status', async (req, res) => {
     const stat = fs.statSync(resolvedFilePath);
     const crypto = require('crypto');
     const fileKey = crypto.createHash('md5').update(`${resolvedFilePath}_${stat.size}_${stat.mtimeMs}`).digest('hex');
-    const fastStartPath = path.join(WEB_VIDEO_CACHE_DIR, `local_${fileKey}_faststart.mp4`);
-    if (fs.existsSync(fastStartPath) && fs.statSync(fastStartPath).size > 0) {
-      return res.json({ ready: true, converting: false, needsTranscode: true, isFastStart: true });
-    }
     const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `local_${fileKey}.mp4`);
     if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
       return res.json({ ready: true, converting: false, needsTranscode: true });
@@ -3488,15 +3486,8 @@ app.get('/api/stream', async (req, res) => {
       }
     }
 
-    // Se NÃO é download, verifica se há versão otimizada em MP4 (FastStart ou transcode ProRes)
+    // Se NÃO é download, verifica se há versão transcodificada compatível (ProRes / DNxHD)
     if (!isDownload) {
-      // 1. Versão FastStart instantânea (moov atom no byte 0, zero buffer no SSD)
-      const fastStartPath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}_faststart.mp4`);
-      if (fs.existsSync(fastStartPath) && fs.statSync(fastStartPath).size > 0) {
-        return streamLocalRangeFile(req, res, fastStartPath, 'video/mp4');
-      }
-
-      // 2. Versão transcodificada compatível (ProRes / DNxHD)
       const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
       if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
         return streamLocalRangeFile(req, res, webCachePath, 'video/mp4');
@@ -3515,10 +3506,6 @@ app.get('/api/stream', async (req, res) => {
         } catch (err) {
           console.error('Falha ao converter ProRes drive:', err.message);
         }
-      } else if (video && video.type !== 'audio' && !mime.startsWith('audio/') && !mime.startsWith('image/')) {
-        // Solução 4: FastStart em segundo plano (-c copy, sem reencodar)
-        // enquanto o usuário assiste instantaneamente aos blocos de 3.5MB via Drive
-        ensureDriveFastStartBackground(fileId, video, userDb);
       }
     }
 
@@ -3621,17 +3608,12 @@ app.get('/api/stream', async (req, res) => {
     }
   }
 
-  // Se NÃO é download, verifica se o vídeo local tem versão FastStart ou precisa de versão web
+  // Se NÃO é download, verifica se o vídeo local precisa de versão web
   if (!isDownload) {
     try {
       const stat = fs.statSync(resolvedFilePath);
       const crypto = require('crypto');
       const fileKey = crypto.createHash('md5').update(`${resolvedFilePath}_${stat.size}_${stat.mtimeMs}`).digest('hex');
-      const fastStartPath = path.join(WEB_VIDEO_CACHE_DIR, `local_${fileKey}_faststart.mp4`);
-      if (fs.existsSync(fastStartPath) && fs.statSync(fastStartPath).size > 0) {
-        return streamLocalRangeFile(req, res, fastStartPath, 'video/mp4');
-      }
-
       const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `local_${fileKey}.mp4`);
       if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
         return streamLocalRangeFile(req, res, webCachePath, 'video/mp4');
@@ -3641,9 +3623,6 @@ app.get('/api/stream', async (req, res) => {
       if (webPath && fs.existsSync(webPath) && fs.statSync(webPath).size > 0) {
         return streamLocalRangeFile(req, res, webPath, 'video/mp4');
       }
-
-      // Agenda FastStart local em segundo plano
-      ensureLocalFastStartBackground(resolvedFilePath, fileKey);
     } catch (e) {
       console.error('Erro na conversão web local:', e.message);
     }

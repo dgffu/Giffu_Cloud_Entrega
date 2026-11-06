@@ -1530,12 +1530,37 @@ class EntregaApp {
     const btnCloseAbout = document.getElementById('btnCloseAboutPopover');
 
     if (btnToggleAbout && aboutPopover) {
+      const positionArrow = () => {
+        const btnRect = btnToggleAbout.getBoundingClientRect();
+        const popoverRect = aboutPopover.getBoundingClientRect();
+        const arrowEl = aboutPopover.querySelector('.popover-arrow-up');
+        if (arrowEl && popoverRect.width > 0) {
+          const btnCenter = btnRect.left + (btnRect.width / 2);
+          const arrowOffset = btnCenter - popoverRect.left;
+          const clampedOffset = Math.max(16, Math.min(popoverRect.width - 16, arrowOffset));
+          arrowEl.style.left = `${clampedOffset}px`;
+          arrowEl.style.transform = 'translateX(-50%) rotate(45deg)';
+        }
+      };
+
       btnToggleAbout.onclick = (e) => {
         e.stopPropagation();
         const isOpen = aboutPopover.style.display !== 'none';
-        aboutPopover.style.display = isOpen ? 'none' : 'block';
-        btnToggleAbout.classList.toggle('active', !isOpen);
+        if (isOpen) {
+          aboutPopover.style.display = 'none';
+          btnToggleAbout.classList.remove('active');
+        } else {
+          aboutPopover.style.display = 'block';
+          btnToggleAbout.classList.add('active');
+          requestAnimationFrame(positionArrow);
+        }
       };
+
+      window.addEventListener('resize', () => {
+        if (aboutPopover.style.display !== 'none') {
+          positionArrow();
+        }
+      });
 
       if (btnCloseAbout) {
         btnCloseAbout.onclick = (e) => {

@@ -2077,10 +2077,10 @@ body.is-dragging-directory .category-header {
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 1000;
   text-align: left;
-  animation: popoverFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: aboutPopoverFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-@keyframes popoverFadeIn {
+@keyframes aboutPopoverFadeIn {
   from {
     opacity: 0;
     transform: translateX(-50%) translateY(-6px);

@@ -1631,7 +1631,17 @@ class CustomVideoPlayer {
     }
     if (this.video) {
       this.video.pause();
+      try {
+        this.video.removeAttribute('src');
+        this.video.load();
+      } catch (e) {}
       this.video.src = '';
+    }
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.playbackState = 'none';
+        navigator.mediaSession.metadata = null;
+      } catch (e) {}
     }
     if (CustomVideoPlayer.activeInstance === this) {
       CustomVideoPlayer.activeInstance = null;

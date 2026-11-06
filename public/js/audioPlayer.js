@@ -1056,6 +1056,12 @@ class CustomAudioPlayer {
       } catch (e) {}
       this.audio = null;
     }
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.playbackState = 'none';
+        navigator.mediaSession.metadata = null;
+      } catch (e) {}
+    }
     this.container = null;
     this.canvas = null;
     this.ctx = null;

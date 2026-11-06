@@ -1664,6 +1664,7 @@ class EntregaApp {
     if (this.handlePwaStartup()) return;
     this.setupTheme();
     this.setupMobileOrientationGuard();
+    this.setupMediaSessionCleanup();
     await window.Auth.init();
     this.authorSession = this.loadAuthorSession();
     await this.fetchData();
@@ -1673,6 +1674,33 @@ class EntregaApp {
     this.setupCategoryContextMenu();
     this.setupUniversalContextMenu();
     this.setupAddCategoryColorPicker();
+  }
+
+  setupMediaSessionCleanup() {
+    const cleanupMediaSession = () => {
+      if (this.playerInstance) {
+        try {
+          this.playerInstance.destroy();
+        } catch (e) {}
+        this.playerInstance = null;
+      }
+      if ('mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.playbackState = 'none';
+          navigator.mediaSession.metadata = null;
+        } catch (e) {}
+      }
+      document.querySelectorAll('video, audio').forEach(el => {
+        try {
+          el.pause();
+          el.removeAttribute('src');
+          el.load();
+        } catch (e) {}
+      });
+    };
+
+    window.addEventListener('pagehide', cleanupMediaSession);
+    window.addEventListener('beforeunload', cleanupMediaSession);
   }
 
   initNotificationsManager() {

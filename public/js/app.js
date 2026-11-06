@@ -2710,6 +2710,82 @@ class EntregaApp {
     return this.data.comments.filter(c => c.projectId === projectId && !c.resolved).length;
   }
 
+  getUnresolvedCommentsCountForFolder(project, folderId) {
+    if (!project || !folderId || !this.data || !this.data.comments) return 0;
+    const folders = project.folders || [];
+    const targetFolderIds = new Set([folderId]);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const f of folders) {
+        if (f.parentId && targetFolderIds.has(f.parentId) && !targetFolderIds.has(f.id)) {
+          targetFolderIds.add(f.id);
+          added = true;
+        }
+      }
+    }
+    const matchingVideoIds = new Set();
+    const videos = project.videos || [];
+    for (const v of videos) {
+      const fid = v.driveFolderId || v.folderId;
+      if (fid && targetFolderIds.has(fid)) {
+        matchingVideoIds.add(v.id);
+      }
+    }
+    return this.data.comments.filter(c => matchingVideoIds.has(c.videoId) && !c.resolved).length;
+  }
+
+  getUnresolvedCommentsCountForDivision(divisionId, categoryName) {
+    if (!this.data || !this.data.comments) return 0;
+    const allDivs = this.data.divisions || [];
+    const catDivs = categoryName ? allDivs.filter(d => d.category === categoryName) : allDivs;
+    const targetDivIds = new Set();
+    let divObj = null;
+    if (divisionId) {
+      targetDivIds.add(divisionId);
+      divObj = allDivs.find(d => d.id === divisionId);
+      let added = true;
+      while (added) {
+        added = false;
+        for (const d of catDivs) {
+          if (d.parentId && targetDivIds.has(d.parentId) && !targetDivIds.has(d.id)) {
+            targetDivIds.add(d.id);
+            added = true;
+          }
+        }
+      }
+    }
+    const divName = divObj ? divObj.name : null;
+    const allProjects = this.data.projects || [];
+    let count = 0;
+    for (const p of allProjects) {
+      if (categoryName && (p.category || 'Categoria Padrão') !== categoryName) continue;
+      let matches = false;
+      if (p.divisionId && targetDivIds.size > 0) {
+        matches = targetDivIds.has(p.divisionId);
+      } else if (divName) {
+        matches = (this.getProjectDivisionName(p).toLowerCase() === divName.toLowerCase());
+      }
+      if (matches) {
+        count += this.getUnresolvedCommentsCountForProject(p.id);
+      }
+    }
+    return count;
+  }
+
+  getUnresolvedCommentsCountForCategory(categoryName) {
+    if (!this.data || !this.data.comments) return 0;
+    const allProjects = this.data.projects || [];
+    let count = 0;
+    for (const p of allProjects) {
+      const pCat = p.category || (this.getCategories()[0] ? this.getCategories()[0].name : 'Categoria Padrão');
+      if (pCat === categoryName) {
+        count += this.getUnresolvedCommentsCountForProject(p.id);
+      }
+    }
+    return count;
+  }
+
   loadCollapsedYears() {
     try {
       const raw = localStorage.getItem('giffu_sidebar_collapsed_years');
@@ -3177,6 +3253,8 @@ class EntregaApp {
           return (p.division || p.year || currentYear).toLowerCase() === div.name.toLowerCase();
         }).sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' }));
 
+        const unresolvedInDiv = this.getUnresolvedCommentsCountForDivision(div.id, cat.name);
+
         return `
           <div class="division-group ${isDivCollapsed ? 'collapsed' : ''}" data-division-id="${div.id}" data-category="${cat.name}">
             <div class="division-header" data-division-id="${div.id}" data-category="${cat.name}" draggable="true" title="${this.escapeHtml(div.name)} (Clique direito para opções, arraste para mover)">
@@ -3186,6 +3264,9 @@ class EntregaApp {
                 <span class="division-title" style="${div.color ? `color: ${div.color};` : ''}">${this.escapeHtml(div.name)}</span>
               </div>
               <div class="division-header-actions">
+                ${unresolvedInDiv > 0 ? `
+                  <span class="dir-unresolved-badge" style="margin-right: 4px;" title="${unresolvedInDiv} comentário${unresolvedInDiv > 1 ? 's' : ''} a resolver">${unresolvedInDiv}</span>
+                ` : ''}
                 <button type="button" class="btn-division-opt" data-division-id="${div.id}" title="Opções da divisão">⋮</button>
               </div>
             </div>
@@ -5761,6 +5842,7 @@ class EntregaApp {
                 countStr = 'Vazia';
               }
               const isFolderSelected = this.isSelectionMode && this.selectedFolderIds && this.selectedFolderIds.has(sub.id);
+              const unresolvedInSub = this.getUnresolvedCommentsCountForFolder(proj, sub.id);
 
               return `
                 <div class="subfolder-card ${isFolderSelected ? 'selected-for-batch' : ''}" data-folder-id="${sub.id}" title="${this.isSelectionMode ? (isFolderSelected ? 'Desmarcar pasta ' + sub.name : 'Selecionar pasta ' + sub.name) : 'Abrir pasta ' + sub.name}">
@@ -5779,6 +5861,9 @@ class EntregaApp {
                     <span class="subfolder-count">${countStr}</span>
                   </div>
                   <div class="subfolder-actions">
+                    ${unresolvedInSub > 0 ? `
+                      <span class="col-unresolved-badge" title="${unresolvedInSub} comentário${unresolvedInSub > 1 ? 's' : ''} a resolver">${unresolvedInSub}</span>
+                    ` : ''}
                     <button class="subfolder-copy-btn" data-folder-id="${sub.id}" data-folder-name="${sub.name}" data-short-code="${sub.shortCode || sub.id}" title="Copiar link desta pasta: https://${this.data?.settings?.baseDomain || 'giffu.com.br'}/${sub.shortCode || sub.id}">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
                     </button>
@@ -6192,6 +6277,7 @@ class EntregaApp {
           if (pCat !== cat.name) return false;
           return projectMatchesCriteria(p);
         }).length;
+        const unresolvedInCat = this.getUnresolvedCommentsCountForCategory(cat.name);
         return `
           <div class="macos-col-item macos-col-cat ${itemClass}"
                data-cat-name="${this.escapeHtml(cat.name)}"
@@ -6206,6 +6292,7 @@ class EntregaApp {
               <span class="macos-col-name">${this.escapeHtml(cat.name)}</span>
             </div>
             <div class="macos-col-item-right">
+              ${unresolvedInCat > 0 ? `<span class="col-unresolved-badge" title="${unresolvedInCat} comentário${unresolvedInCat > 1 ? 's' : ''} a resolver">${unresolvedInCat}</span>` : ''}
               ${count > 0 ? `<span class="macos-col-badge">${count}</span>` : ''}
               <svg class="macos-col-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="9 18 15 12 9 6"></polyline>
@@ -6300,6 +6387,7 @@ class EntregaApp {
             return projectMatchesCriteria(p);
           }).length;
           const totalCount = subCount + dirCount;
+          const unresolvedInDiv = this.getUnresolvedCommentsCountForDivision(div.id, activeCatName);
 
           return `
             <div class="macos-col-item macos-col-div ${itemClass}"
@@ -6317,6 +6405,7 @@ class EntregaApp {
                 <span class="macos-col-name">${this.escapeHtml(div.name)}</span>
               </div>
               <div class="macos-col-item-right">
+                ${unresolvedInDiv > 0 ? `<span class="col-unresolved-badge" title="${unresolvedInDiv} comentário${unresolvedInDiv > 1 ? 's' : ''} a resolver">${unresolvedInDiv}</span>` : ''}
                 ${totalCount > 0 ? `<span class="macos-col-badge">${totalCount}</span>` : ''}
                 <svg class="macos-col-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="9 18 15 12 9 6"></polyline>
@@ -6378,6 +6467,7 @@ class EntregaApp {
           const fileObj = (p.videos && p.videos[0]) || null;
           const fileType = p.fileType || (fileObj && (fileObj.itemType || fileObj.type)) || 'file';
           const ext = ((fileObj && (fileObj.fileName || fileObj.title)) || p.name || '').split('.').pop() || '';
+          const unresolvedInProj = this.getUnresolvedCommentsCountForProject(p.id);
 
           let iconSvg = '';
           if (isLoose) {
@@ -6415,6 +6505,7 @@ class EntregaApp {
                 <span class="macos-col-name">${this.escapeHtml(p.name)}</span>
               </div>
               <div class="macos-col-item-right">
+                ${unresolvedInProj > 0 ? `<span class="col-unresolved-badge" title="${unresolvedInProj} comentário${unresolvedInProj > 1 ? 's' : ''} a resolver">${unresolvedInProj}</span>` : ''}
                 ${isLoose 
                   ? (ext ? `<span class="macos-col-ext-tag">${this.escapeHtml(ext.toUpperCase().slice(0, 4))}</span>` : '')
                   : `${totalItems > 0 ? `<span class="macos-col-badge">${totalItems}</span>` : ''}
@@ -6566,6 +6657,7 @@ class EntregaApp {
 
               const totalInside = directFiles + directSubs;
               const isFolderBatchSelected = this.isSelectionMode && this.selectedFolderIds && this.selectedFolderIds.has(sub.id);
+              const unresolvedInSub = this.getUnresolvedCommentsCountForFolder(effectiveProj, sub.id);
 
               return `
                 <div class="macos-col-item macos-col-folder ${folderItemClass} ${isFolderBatchSelected ? 'selected-for-batch' : ''}" 
@@ -6589,6 +6681,7 @@ class EntregaApp {
                     <span class="macos-col-name">${this.escapeHtml(sub.name)}</span>
                   </div>
                   <div class="macos-col-item-right">
+                    ${unresolvedInSub > 0 ? `<span class="col-unresolved-badge" title="${unresolvedInSub} comentário${unresolvedInSub > 1 ? 's' : ''} a resolver">${unresolvedInSub}</span>` : ''}
                     ${totalInside > 0 ? `<span class="macos-col-badge">${totalInside}</span>` : ''}
                     <svg class="macos-col-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <polyline points="9 18 15 12 9 6"></polyline>
@@ -6645,7 +6738,7 @@ class EntregaApp {
                     <span class="macos-col-name">${this.escapeHtml(this.getDisplayTitle(item))}</span>
                   </div>
                   <div class="macos-col-item-right">
-                    ${unresolved > 0 ? `<span class="macos-col-unresolved-pill" title="${unresolved} comentários a resolver">${unresolved}</span>` : ''}
+                    ${unresolved > 0 ? `<span class="col-unresolved-badge" title="${unresolved} comentário${unresolved > 1 ? 's' : ''} a resolver">${unresolved}</span>` : ''}
                     <span class="macos-col-ext-tag">${ext}</span>
                   </div>
                 </div>

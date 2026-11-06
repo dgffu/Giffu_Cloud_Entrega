@@ -934,11 +934,41 @@ class CustomAudioPlayer {
     const bufferBar = this.container.querySelector('#audioBufferBar');
     if (!bufferBar) return;
 
-    if (this.audio.buffered && this.audio.buffered.length > 0) {
-      const bufferedEnd = this.audio.buffered.end(this.audio.buffered.length - 1);
-      const percent = (bufferedEnd / this.audio.duration) * 100;
-      bufferBar.style.width = `${Math.min(100, percent)}%`;
+    const b = this.audio.buffered;
+    if (!b || b.length === 0) {
+      bufferBar.style.width = '0%';
+      return;
     }
+
+    const cur = this.audio.currentTime || 0;
+    const dur = this.audio.duration;
+    let activeEnd = 0;
+
+    for (let i = 0; i < b.length; i++) {
+      const start = b.start(i);
+      const end = b.end(i);
+      if (cur >= (start - 0.25) && cur <= (end + 0.25)) {
+        activeEnd = Math.max(activeEnd, end);
+      }
+    }
+
+    if (activeEnd <= cur) {
+      for (let i = 0; i < b.length; i++) {
+        const start = b.start(i);
+        const end = b.end(i);
+        if (start <= cur + 2.0 && end > cur) {
+          activeEnd = Math.max(activeEnd, end);
+        }
+      }
+    }
+
+    if (activeEnd <= 0) {
+      if (b.start(0) <= cur + 1.0) activeEnd = b.end(0);
+      else activeEnd = cur;
+    }
+
+    const percent = (activeEnd / dur) * 100;
+    bufferBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
   }
 
   handleLoadedMetadata() {

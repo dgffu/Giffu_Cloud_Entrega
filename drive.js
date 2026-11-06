@@ -448,14 +448,14 @@ async function streamFile(req, res, readDB, fileId, { download = false, fileName
     if (download) {
       headers.Range = rawRange;
     } else {
-      // Para streaming/reprodução de mídia: chunk-clamping de 3.5 MB
-      // Impede que o Google Drive tente descarregar arquivos de 500MB+ numa única conexão lenta,
-      // reduz o TTFB a milissegundos e elimina sobrecarga/congelamento no player
+      // Para streaming/reprodução de mídia: chunk adaptativo de alto desempenho
+      // Chunk inicial (start = 0): 8 MB (playback em < 250ms com 3.5s de buffer imediato)
+      // Chunks subsequentes (start > 0): 16 MB (7-8s de runway contínuo, zero buffer underrun)
       const rangeMatch = rawRange.match(/^bytes=(\d+)-(\d+)?$/i);
       if (rangeMatch) {
         const start = parseInt(rangeMatch[1], 10);
         const clientEnd = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : null;
-        const STREAM_CHUNK_SIZE = 3.5 * 1024 * 1024; // 3.5 MB por fatia
+        const STREAM_CHUNK_SIZE = start === 0 ? (8 * 1024 * 1024) : (16 * 1024 * 1024);
         if (clientEnd !== null && (clientEnd - start + 1) <= STREAM_CHUNK_SIZE) {
           headers.Range = `bytes=${start}-${clientEnd}`;
         } else {

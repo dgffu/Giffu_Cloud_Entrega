@@ -110,7 +110,7 @@ class CustomVideoPlayer {
 
     this.container.innerHTML = `
       <!-- Video Element -->
-      <video class="custom-video-element" playsinline webkit-playsinline x5-playsinline preload="metadata" src="${streamUrl}"></video>
+      <video class="custom-video-element" playsinline webkit-playsinline x5-playsinline preload="auto" src="${streamUrl}"></video>
 
       <!-- Transcode / Preparing State Overlay -->
       <div class="alpha-transcode-overlay" id="alphaTranscodeOverlay" style="display: none;">
@@ -353,6 +353,56 @@ class CustomVideoPlayer {
       // Tolerância com debounce de 380ms para absorver oscilações normais entre chunks sem congelar o player
       this._bufferingTimer = setTimeout(applyBufferingUi, 380);
     }
+  }
+
+  updateBufferProgress() {
+    if (!this.video || !this.bufferBar) return;
+    const dur = this.video.duration || 0;
+    if (dur <= 0) {
+      this.bufferBar.style.width = '0%';
+      return;
+    }
+
+    const b = this.video.buffered;
+    if (!b || b.length === 0) {
+      this.bufferBar.style.width = '0%';
+      return;
+    }
+
+    const cur = this.video.currentTime || 0;
+    let activeEnd = 0;
+
+    // Encontra a faixa de buffer contígua que engloba ou está imediatamente à frente do ponto atual de reprodução
+    for (let i = 0; i < b.length; i++) {
+      const start = b.start(i);
+      const end = b.end(i);
+      if (cur >= (start - 0.25) && cur <= (end + 0.25)) {
+        activeEnd = Math.max(activeEnd, end);
+      }
+    }
+
+    // Se nenhuma faixa cobrir exatamente currentTime, busca a faixa mais próxima logo à frente (buffer sendo carregado)
+    if (activeEnd <= cur) {
+      for (let i = 0; i < b.length; i++) {
+        const start = b.start(i);
+        const end = b.end(i);
+        if (start <= cur + 2.0 && end > cur) {
+          activeEnd = Math.max(activeEnd, end);
+        }
+      }
+    }
+
+    // Fallback: se estiver no início ou após seek antes da nova faixa ser registrada
+    if (activeEnd <= 0) {
+      if (b.start(0) <= cur + 1.0) {
+        activeEnd = b.end(0);
+      } else {
+        activeEnd = cur;
+      }
+    }
+
+    const pct = Math.min(100, Math.max(0, (activeEnd / dur) * 100));
+    this.bufferBar.style.width = `${pct.toFixed(2)}%`;
   }
 
   seekTo(seconds) {
@@ -805,6 +855,7 @@ class CustomVideoPlayer {
       if (this.video.readyState >= 3) {
         this.setBuffering(false);
       }
+      this.updateBufferProgress();
     });
 
     this.video.addEventListener('canplay', () => {
@@ -813,32 +864,47 @@ class CustomVideoPlayer {
       if (this.video.readyState >= 3) {
         this.setBuffering(false);
       }
+      if (this.isPlaying && this.video.paused) {
+        this.video.play().catch(() => {});
+      }
+      this.updateBufferProgress();
     });
 
     this.video.addEventListener('canplaythrough', () => {
       this.setBuffering(false);
+      if (this.isPlaying && this.video.paused) {
+        this.video.play().catch(() => {});
+      }
+      this.updateBufferProgress();
     });
 
     this.video.addEventListener('waiting', () => {
       this.setBuffering(true, false);
+      this.updateBufferProgress();
     });
 
     this.video.addEventListener('seeking', () => {
       if (this.isPlaying) {
         this.setBuffering(true, false);
       }
+      this.updateBufferProgress();
     });
 
     this.video.addEventListener('seeked', () => {
       if (this.video.readyState >= 3) {
         this.setBuffering(false);
       }
+      if (this.isPlaying && this.video.paused) {
+        this.video.play().catch(() => {});
+      }
+      this.updateBufferProgress();
     });
 
     this.video.addEventListener('playing', () => {
       this.isPlaying = true;
       this._networkRetryCount = 0;
       this.setBuffering(false);
+      this.updateBufferProgress();
     });
 
     // Handle format/codec error or transient mobile network error
@@ -938,6 +1004,7 @@ class CustomVideoPlayer {
       if (this.isBuffering && !this.video.paused) {
         this.setBuffering(false);
       }
+      this.updateBufferProgress();
       if (this.isSeeking) return;
       const cur = this.video.currentTime;
       const dur = this.video.duration || 0;
@@ -953,13 +1020,7 @@ class CustomVideoPlayer {
 
     // Buffer progress
     this.video.addEventListener('progress', () => {
-      if (this.video.buffered.length > 0) {
-        const bufferedEnd = this.video.buffered.end(this.video.buffered.length - 1);
-        const dur = this.video.duration || 0;
-        if (dur > 0) {
-          this.bufferBar.style.width = `${(bufferedEnd / dur) * 100}%`;
-        }
-      }
+      this.updateBufferProgress();
     });
 
     // Scrubber click & drag (compatível com modo normal e rotacionado 90deg no mobile, mouse e touch)

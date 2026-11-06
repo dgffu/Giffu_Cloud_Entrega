@@ -3012,9 +3012,9 @@ function streamLocalRangeFile(req, res, filePath, customContentType = null, cust
       if (requestedEnd !== null) {
         end = Math.min(requestedEnd, fileSize - 1);
       } else {
-        // Range aberto para streaming: fatiamento de 4MB por chunk
-        const LOCAL_CHUNK_SIZE = 4 * 1024 * 1024;
-        end = forceDownload ? (fileSize - 1) : Math.min(start + LOCAL_CHUNK_SIZE - 1, fileSize - 1);
+        // Range aberto para streaming local (SSD): transmite continuamente até o fim do arquivo
+        // com controle de fluxo natural pelo backpressure do Node.js/TCP
+        end = fileSize - 1;
       }
     }
 

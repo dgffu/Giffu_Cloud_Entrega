@@ -400,8 +400,8 @@ class CustomVideoPlayer {
 
   isFullscreen() {
     const isNative = !!(
-      (document.fullscreenElement && (document.fullscreenElement === this.container || this.container.contains(document.fullscreenElement))) ||
-      (document.webkitFullscreenElement && (document.webkitFullscreenElement === this.container || this.container.contains(document.webkitFullscreenElement))) ||
+      (document.fullscreenElement && (document.fullscreenElement === this.container || this.container.contains(document.fullscreenElement) || document.fullscreenElement === document.documentElement)) ||
+      (document.webkitFullscreenElement && (document.webkitFullscreenElement === this.container || this.container.contains(document.webkitFullscreenElement) || document.webkitFullscreenElement === document.documentElement)) ||
       (this.video && this.video.webkitDisplayingFullscreen)
     );
     return isNative || this.container.classList.contains('is-fullscreen');
@@ -420,16 +420,73 @@ class CustomVideoPlayer {
     }
   }
 
+  setFullscreenThemeColor(active) {
+    try {
+      let meta = document.querySelector('meta[name="theme-color"]');
+      if (active) {
+        if (!meta) {
+          meta = document.createElement('meta');
+          meta.setAttribute('name', 'theme-color');
+          meta.dataset.createdByPlayer = '1';
+          document.head.appendChild(meta);
+        } else if (this._prevThemeColor === undefined) {
+          this._prevThemeColor = meta.getAttribute('content') || '';
+        }
+        meta.setAttribute('content', '#000000');
+      } else if (meta) {
+        if (meta.dataset.createdByPlayer === '1') {
+          meta.remove();
+        } else if (this._prevThemeColor !== undefined) {
+          meta.setAttribute('content', this._prevThemeColor);
+          this._prevThemeColor = undefined;
+        }
+      }
+    } catch (e) {}
+  }
+
+  syncFullscreenViewport() {
+    if (!this.container) return { vw: window.innerWidth, vh: window.innerHeight };
+    const vv = window.visualViewport;
+    const vw = vv && vv.width ? vv.width : window.innerWidth;
+    const vh = vv && vv.height ? vv.height : window.innerHeight;
+    const offsetTop = vv ? vv.offsetTop : 0;
+    const offsetLeft = vv ? vv.offsetLeft : 0;
+
+    if (this.isFullscreen()) {
+      this.container.style.setProperty('--fs-vw', `${vw}px`);
+      this.container.style.setProperty('--fs-vh', `${vh}px`);
+      this.container.style.setProperty('--fs-top', `${offsetTop}px`);
+      this.container.style.setProperty('--fs-left', `${offsetLeft}px`);
+      this.container.style.setProperty('--fs-center-x', `${offsetLeft + vw / 2}px`);
+      this.container.style.setProperty('--fs-center-y', `${offsetTop + vh / 2}px`);
+    } else {
+      this.container.style.removeProperty('--fs-vw');
+      this.container.style.removeProperty('--fs-vh');
+      this.container.style.removeProperty('--fs-top');
+      this.container.style.removeProperty('--fs-left');
+      this.container.style.removeProperty('--fs-center-x');
+      this.container.style.removeProperty('--fs-center-y');
+    }
+
+    return { vw, vh, offsetTop, offsetLeft };
+  }
+
   updateFullscreenOrientation() {
     if (!this.isFullscreen()) {
+      this.container.classList.remove('fullscreen-rotated-landscape');
+      this.syncFullscreenViewport();
       return;
     }
 
+    const { vw, vh } = this.syncFullscreenViewport();
+    const isMobile = this.isMobileDevice();
     const isVertical = this.isVerticalVideo();
+    const isDevicePortrait = vh > vw;
 
     if (isVertical) {
       // COM EXCEÇÃO DOS VÍDEOS VERTICAIS:
       // se mantém verticais na tela cheia, preenchendo a tela em formato retrato.
+      this.container.classList.remove('fullscreen-rotated-landscape');
       if (screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('portrait-primary').catch(() => {
           screen.orientation.lock('portrait').catch(() => {});
@@ -437,11 +494,17 @@ class CustomVideoPlayer {
       }
     } else {
       // VÍDEOS HORIZONTAIS / WIDE:
-      // no mobile, ao entrar em tela cheia, bloqueia/vira em wide automaticamente quando suportado
+      // solicita bloqueio em landscape quando suportado (Android) e, se a viewport permanecer em retrato
+      // (ex: Lock Rotation do smartphone ativado ou iPhone/iOS), gira automaticamente o player do app em 90deg.
       if (screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('landscape-primary').catch(() => {
           screen.orientation.lock('landscape').catch(() => {});
         });
+      }
+      if (isMobile && isDevicePortrait) {
+        this.container.classList.add('fullscreen-rotated-landscape');
+      } else {
+        this.container.classList.remove('fullscreen-rotated-landscape');
       }
     }
   }
@@ -459,15 +522,15 @@ class CustomVideoPlayer {
     const onEnterSuccess = () => {
       this.container.classList.add('is-fullscreen');
       document.body.classList.add('video-fullscreen-active');
+      document.documentElement.classList.add('video-fullscreen-active');
+      this.setFullscreenThemeColor(true);
       this.applyOrientationLock(effectiveDir);
       this.updateFullscreenOrientation();
       this.updateFullscreenIcon(true);
-      try {
-        window.scrollTo(0, 1);
-      } catch (e) {}
     };
 
-    // Solicita Fullscreen API exclusivamente no CONTAINER do app (para manter sempre o player do app e nunca o player nativo do dispositivo)
+    // Solicita Fullscreen API exclusivamente no CONTAINER do app (ou documentElement), nunca no <video> nativo,
+    // garantindo o player do app sem barras do navegador onde a API é suportada
     const fsOptions = { navigationUI: 'hide' };
     const req = this.container.requestFullscreen ||
                 this.container.webkitRequestFullscreen ||
@@ -486,6 +549,7 @@ class CustomVideoPlayer {
 
       if (p && p.then) {
         p.then(() => {
+          this._hadNativeFullscreen = true;
           onEnterSuccess();
         }).catch(() => {
           onEnterSuccess();
@@ -494,14 +558,13 @@ class CustomVideoPlayer {
         onEnterSuccess();
       }
     } else {
-      // Ambientes móveis sem suporte a requestFullscreen no elemento container (ex: iPhone Safari):
-      // Ativa a tela cheia pelo player customizado do app (CSS edge-to-edge), mantendo a interface e controles do app
       onEnterSuccess();
     }
   }
 
   exitFullscreen() {
     this._enteredFullscreenViaRotate = false;
+    this._hadNativeFullscreen = false;
 
     if (document.fullscreenElement || document.webkitFullscreenElement) {
       if (document.exitFullscreen) {
@@ -514,8 +577,11 @@ class CustomVideoPlayer {
       try { this.video.webkitExitFullscreen(); } catch (e) {}
     }
 
-    this.container.classList.remove('is-fullscreen');
+    this.container.classList.remove('is-fullscreen', 'fullscreen-rotated-landscape');
     document.body.classList.remove('video-fullscreen-active');
+    document.documentElement.classList.remove('video-fullscreen-active');
+    this.setFullscreenThemeColor(false);
+    this.syncFullscreenViewport();
     this.updateFullscreenIcon(false);
 
     if (screen.orientation && screen.orientation.unlock) {
@@ -567,7 +633,21 @@ class CustomVideoPlayer {
   setupOrientationHandler() {
     CustomVideoPlayer.activeInstance = this;
 
+    this.onVisualViewportUpdate = () => {
+      if (this.isFullscreen()) {
+        this.updateFullscreenOrientation();
+      }
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', this.onVisualViewportUpdate);
+      window.visualViewport.addEventListener('scroll', this.onVisualViewportUpdate);
+    }
+
     this.onOrientationChange = () => {
+      if (this.isFullscreen()) {
+        this.syncFullscreenViewport();
+      }
       // Settle time for viewport on mobile rotation
       setTimeout(() => {
         if (!this.video) return;
@@ -601,7 +681,7 @@ class CustomVideoPlayer {
             }
           }
         }
-      }, 150);
+      }, 120);
     };
 
     window.addEventListener('orientationchange', this.onOrientationChange);
@@ -612,18 +692,22 @@ class CustomVideoPlayer {
 
     this.onFullscreenChange = () => {
       const isNative = !!(
-        (document.fullscreenElement && (document.fullscreenElement === this.container || this.container.contains(document.fullscreenElement))) ||
-        (document.webkitFullscreenElement && (document.webkitFullscreenElement === this.container || this.container.contains(document.webkitFullscreenElement))) ||
+        (document.fullscreenElement && (document.fullscreenElement === this.container || this.container.contains(document.fullscreenElement) || document.fullscreenElement === document.documentElement)) ||
+        (document.webkitFullscreenElement && (document.webkitFullscreenElement === this.container || this.container.contains(document.webkitFullscreenElement) || document.webkitFullscreenElement === document.documentElement)) ||
         (this.video && this.video.webkitDisplayingFullscreen)
       );
 
-      if (!isNative && !this.container.classList.contains('is-fullscreen')) {
-        this.exitFullscreen();
-      } else if (isNative) {
+      if (isNative) {
+        this._hadNativeFullscreen = true;
         this.container.classList.add('is-fullscreen');
         document.body.classList.add('video-fullscreen-active');
+        document.documentElement.classList.add('video-fullscreen-active');
+        this.setFullscreenThemeColor(true);
         this.updateFullscreenOrientation();
         this.updateFullscreenIcon(true);
+      } else if (this._hadNativeFullscreen) {
+        this._hadNativeFullscreen = false;
+        this.exitFullscreen();
       }
     };
 
@@ -632,13 +716,17 @@ class CustomVideoPlayer {
 
     this.video.addEventListener('webkitbeginfullscreen', () => {
       document.body.classList.add('video-fullscreen-active');
+      document.documentElement.classList.add('video-fullscreen-active');
       this.container.classList.add('is-fullscreen');
       this.updateFullscreenIcon(true);
     });
 
     this.video.addEventListener('webkitendfullscreen', () => {
       document.body.classList.remove('video-fullscreen-active');
-      this.container.classList.remove('is-fullscreen');
+      document.documentElement.classList.remove('video-fullscreen-active');
+      this.container.classList.remove('is-fullscreen', 'fullscreen-rotated-landscape');
+      this.setFullscreenThemeColor(false);
+      this.syncFullscreenViewport();
       this.updateFullscreenIcon(false);
       if (screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('portrait').catch(() => {});
@@ -796,10 +884,17 @@ class CustomVideoPlayer {
       }
     });
 
-    // Scrubber click & drag
-    const handleTimelineSeek = (e) => {
+    // Scrubber click & drag (compatível com modo normal e rotacionado 90deg no mobile, mouse e touch)
+    const getTimelineRatio = (clientX, clientY) => {
       const rect = this.timelineWrapper.getBoundingClientRect();
-      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      if (this.container.classList.contains('fullscreen-rotated-landscape')) {
+        return Math.max(0, Math.min(1, (clientY - rect.top) / (rect.height || 1)));
+      }
+      return Math.max(0, Math.min(1, (clientX - rect.left) / (rect.width || 1)));
+    };
+
+    const handleTimelineSeek = (clientX, clientY) => {
+      const pos = getTimelineRatio(clientX, clientY);
       const dur = this.video.duration || 0;
       this.video.currentTime = pos * dur;
     };
@@ -809,28 +904,54 @@ class CustomVideoPlayer {
       isSeeking = true;
       this.isInteracting = true;
       this.showHUD();
-      handleTimelineSeek(e);
+      handleTimelineSeek(e.clientX, e.clientY);
     });
 
-    window.addEventListener('mousemove', (e) => {
+    this.onTimelineMouseMove = (e) => {
       if (isSeeking) {
         this.showHUD();
-        handleTimelineSeek(e);
+        handleTimelineSeek(e.clientX, e.clientY);
       }
-    });
+    };
+    window.addEventListener('mousemove', this.onTimelineMouseMove);
 
-    window.addEventListener('mouseup', () => {
+    this.onTimelineMouseUp = () => {
       if (isSeeking) {
         isSeeking = false;
         this.isInteracting = false;
         this.showHUD();
       }
-    });
+    };
+    window.addEventListener('mouseup', this.onTimelineMouseUp);
+
+    this.timelineWrapper.addEventListener('touchstart', (e) => {
+      if (e.touches && e.touches.length > 0) {
+        isSeeking = true;
+        this.isInteracting = true;
+        this.showHUD();
+        handleTimelineSeek(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: true });
+
+    this.timelineWrapper.addEventListener('touchmove', (e) => {
+      if (isSeeking && e.touches && e.touches.length > 0) {
+        if (e.cancelable) e.preventDefault();
+        this.showHUD();
+        handleTimelineSeek(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: false });
+
+    this.timelineWrapper.addEventListener('touchend', () => {
+      if (isSeeking) {
+        isSeeking = false;
+        this.isInteracting = false;
+        this.showHUD();
+      }
+    }, { passive: true });
 
     // Timeline hover tooltip
     this.timelineWrapper.addEventListener('mousemove', (e) => {
-      const rect = this.timelineWrapper.getBoundingClientRect();
-      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const pos = getTimelineRatio(e.clientX, e.clientY);
       const dur = this.video.duration || 0;
       const hoverTime = pos * dur;
       this.timeTooltip.style.left = `${pos * 100}%`;
@@ -1213,6 +1334,16 @@ class CustomVideoPlayer {
     clearTimeout(this.volumeHideTimer);
     if (this.onVolumeGlobalMouseUp) {
       window.removeEventListener('mouseup', this.onVolumeGlobalMouseUp);
+    }
+    if (this.onTimelineMouseMove) {
+      window.removeEventListener('mousemove', this.onTimelineMouseMove);
+    }
+    if (this.onTimelineMouseUp) {
+      window.removeEventListener('mouseup', this.onTimelineMouseUp);
+    }
+    if (this.onVisualViewportUpdate && window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', this.onVisualViewportUpdate);
+      window.visualViewport.removeEventListener('scroll', this.onVisualViewportUpdate);
     }
     if (this.onActivity) {
       this.container.removeEventListener('mousemove', this.onActivity);

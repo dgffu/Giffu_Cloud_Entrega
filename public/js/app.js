@@ -1575,13 +1575,24 @@ class EntregaApp {
   }
 
   setupMobileOrientationGuard() {
-    const lockPortrait = () => {
+    const lockPortrait = (e) => {
+      if (
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.body.classList.contains('video-fullscreen-active') ||
+        (this.playerInstance && this.playerInstance.isFullscreen && this.playerInstance.isFullscreen())
+      ) {
+        return;
+      }
+      if (e && e.target && e.target.closest && e.target.closest('#btnFullscreen, .custom-player-wrapper')) {
+        return;
+      }
       if (screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('portrait').catch(() => {});
       }
     };
 
-    // Attempt lock portrait early and on user interaction
+    // Attempt lock portrait early and on user interaction (exceto quando o player estiver em tela cheia)
     lockPortrait();
     window.addEventListener('click', lockPortrait, { passive: true });
     window.addEventListener('touchstart', lockPortrait, { passive: true });
@@ -1623,7 +1634,8 @@ class EntregaApp {
         document.fullscreenElement ||
         document.webkitFullscreenElement ||
         (this.playerInstance && this.playerInstance.video && this.playerInstance.video.webkitDisplayingFullscreen) ||
-        document.body.classList.contains('video-fullscreen-active')
+        document.body.classList.contains('video-fullscreen-active') ||
+        (this.playerInstance && this.playerInstance.isFullscreen && this.playerInstance.isFullscreen())
       );
 
       const isVideoPlaying = !!(
@@ -1635,10 +1647,11 @@ class EntregaApp {
 
       if (isLandscape) {
         if (isVideoPlaying) {
-          // Playing video: fullscreen in the direction rotated
+          // Playing video: fullscreen in the direction rotated (exceto vídeos verticais)
           if (guard) guard.style.display = 'none';
-          if (this.playerInstance && !isVideoFullscreen) {
+          if (this.playerInstance && !isVideoFullscreen && !this.playerInstance.isVerticalVideo()) {
             const direction = (angle === 270 || type === 'landscape-secondary') ? 'landscape-secondary' : 'landscape-primary';
+            this.playerInstance._enteredFullscreenViaRotate = true;
             this.playerInstance.enterFullscreen(direction);
           }
         } else if (isVideoFullscreen) {
@@ -1655,11 +1668,9 @@ class EntregaApp {
           }
         }
       } else {
-        // Portrait mode
+        // Portrait mode: oculta apenas o guard; o ciclo de tela cheia é controlado pelo CustomVideoPlayer
+        // para permitir tela cheia com rotação automática mesmo quando o lock rotation do celular está ativo
         if (guard) guard.style.display = 'none';
-        if (this.playerInstance && isVideoFullscreen) {
-          this.playerInstance.exitFullscreen();
-        }
       }
     };
 

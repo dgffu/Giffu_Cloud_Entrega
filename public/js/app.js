@@ -1673,7 +1673,7 @@ class EntregaApp {
   }
 
   getDefaultColor() {
-    return this.data?.settings?.defaultColor || localStorage.getItem('giffu_default_color') || '#FF5400';
+    return this.data?.settings?.defaultColor || window.__SERVER_DEFAULT_COLOR__ || (this.authorSession ? localStorage.getItem('giffu_default_color') : null) || '#FF5400';
   }
 
   applyThemeColor(hex) {
@@ -1844,11 +1844,12 @@ class EntregaApp {
         }
         if (s.defaultColor) {
           localStorage.setItem('giffu_default_color', s.defaultColor);
-          this.applyThemeColor(s.defaultColor);
-        } else {
-          this.applyThemeColor(this.getDefaultColor());
         }
       }
+
+      // Aplica a cor padrão predominante da conta de autor (tanto para autor quanto para link do cliente)
+      const effectiveThemeColor = this.data?.settings?.defaultColor || window.__SERVER_DEFAULT_COLOR__ || this.getDefaultColor();
+      this.applyThemeColor(effectiveThemeColor);
     } catch (e) {
       console.error('Erro ao buscar dados:', e);
     }

@@ -357,6 +357,7 @@ function buildSafeClientPayload(req, { project, userDb, userId, type = 'project'
     authorName: s.authorName || (userDb && userDb.user && userDb.user.name) || 'Autor',
     authorAvatar: s.authorAvatar || (userDb && userDb.user && userDb.user.avatar) || '',
     theme: s.theme || 'dark',
+    defaultColor: s.defaultColor || '#FF5400',
     showFileExtensions: s.showFileExtensions
   };
 
@@ -3267,7 +3268,7 @@ app.post('/api/settings', requireAuthor, (req, res) => {
   res.json(userDb.settings);
 });
 
-function sendHtmlWithTitle(res, pageTitle, hideBrand = true, authorName = 'Giffú') {
+function sendHtmlWithTitle(res, pageTitle, hideBrand = true, authorName = 'Giffú', authorColor = '#FF5400') {
   try {
     const htmlPath = path.join(__dirname, 'public', 'index.html');
     let html = fs.readFileSync(htmlPath, 'utf-8');
@@ -3278,6 +3279,25 @@ function sendHtmlWithTitle(res, pageTitle, hideBrand = true, authorName = 'Giff�
     html = html.replace(/<title>.*?<\/title>/i, `<title>${safeTitle}</title>`);
     html = html.replace(/<meta property="og:title" content=".*?">/i, `<meta property="og:title" content="${safeTitle}">`);
     html = html.replace(/<meta name="twitter:title" content=".*?">/i, `<meta name="twitter:title" content="${safeTitle}">`);
+
+    // Injeta estilo CSS e variável com a cor padrão da conta de autor (evita flicker na abertura do link de cliente)
+    let hex = (authorColor && typeof authorColor === 'string' && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(authorColor.trim()))
+      ? authorColor.trim()
+      : '#FF5400';
+
+    const r = parseInt(hex.length === 4 ? hex[1] + hex[1] : hex.slice(1, 3), 16);
+    const g = parseInt(hex.length === 4 ? hex[2] + hex[2] : hex.slice(3, 5), 16);
+    const b = parseInt(hex.length === 4 ? hex[3] + hex[3] : hex.slice(5, 7), 16);
+
+    const subtle = `rgba(${r}, ${g}, ${b}, 0.12)`;
+    const glow = `rgba(${r}, ${g}, ${b}, 0.28)`;
+    const hoverR = Math.min(255, Math.max(0, Math.round(r * 1.12)));
+    const hoverG = Math.min(255, Math.max(0, Math.round(g * 1.12)));
+    const hoverB = Math.min(255, Math.max(0, Math.round(b * 1.12)));
+    const hover = `#${hoverR.toString(16).padStart(2, '0')}${hoverG.toString(16).padStart(2, '0')}${hoverB.toString(16).padStart(2, '0')}`;
+
+    const themeOverrideTag = `<style id="server-theme-override">:root { --brand-orange: ${hex} !important; --brand-orange-hover: ${hover} !important; --brand-orange-subtle: ${subtle} !important; --brand-orange-glow: ${glow} !important; }</style><script>window.__SERVER_DEFAULT_COLOR__ = "${hex}";</script>`;
+    html = html.replace('</head>', `${themeOverrideTag}\n</head>`);
 
     // Em rotas do cliente, já envia o badge como Cloud para evitar flicker inicial
     const brandLogoSvg = '<svg class="brand-badge-logo" viewBox="0 0 1585.74 1030.98" width="22" height="15" fill="currentColor" aria-hidden="true"><path fill="currentColor" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/><path fill="currentColor" d="M86.51,508.26c-.28.3-.55.61-.82.91-1.87-.33-3.73-.63-5.61-.91h6.43Z"/><g><path fill="currentColor" d="M331.2,1024.8c-26.64-5.22-52.18-13.64-76.22-24.84C106.1,944.84,0,801.6,0,633.58c0-195.39,143.43-357.25,330.76-386.04-22.01,27.86-34.3,62.6-34.3,99.73v577.31c0,29.93,8.07,58.96,23.33,83.94,3.46,5.66,7.27,11.1,11.41,16.28Z"/><path fill="currentColor" d="M1585.74,693.33c0,122.09-69.26,228.03-170.62,280.62-53.46,36.06-117.43,57.03-186.14,57.03h-636.4l444.28-272.6c49.44-30.34,78.18-83.07,76.87-141.06-1.31-58-32.4-109.38-83.16-137.46l-494.84-273.69c-12.02-6.65-24.56-11.66-37.37-15.05C589.85,74.73,731.91,0,891.42,0c240.88,0,441.95,170.45,489.19,397.33,119.84,44.92,205.13,160.48,205.13,296Z"/></g><g><path fill="currentColor" d="M955.63,698.49l-434.14,266.38c-.14.09-.28.17-.42.25-27.71,16.8-61.1,17.39-89.41,1.54-28.45-15.92-45.44-44.9-45.44-77.5v-506.49c0-31.77,16.34-60.37,43.7-76.51,10.63-6.26,22.1-10.17,33.79-11.69,4.21.59,8.39,1.25,12.55,1.98.52-.89,1.04-1.79,1.57-2.68,13.79.45,27.53,4.17,40.2,11.18l13.91,7.69,420.23,232.42c27.96,15.46,45.09,43.77,45.81,75.71.72,31.94-15.11,60.99-42.34,77.71Z"/><path fill="currentColor" d="M477.83,293.78c-.53.89-1.05,1.78-1.57,2.68-4.16-.74-8.33-1.4-12.55-1.98,3.75-.49,7.53-.74,11.3-.74.94,0,1.88.02,2.82.04Z"/></g></svg>';
@@ -3300,6 +3320,7 @@ app.get('/entrega/:slug', (req, res) => {
   if (resolved) {
     const { project, userDb, type, folderId, videoId } = resolved;
     const authorName = (userDb && userDb.settings && userDb.settings.authorName) || (userDb && userDb.user && userDb.user.name) || 'Giffú';
+    const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
     let hideBrand = project ? (project.hideBrandName !== false) : true;
     let title = project.name || (hideBrand ? 'Cloud' : `${authorName} Cloud`);
     if (type === 'file' && videoId) {
@@ -3315,17 +3336,18 @@ app.get('/entrega/:slug', (req, res) => {
       }
       if (f) title = f.name || project.name;
     }
-    return sendHtmlWithTitle(res, title, hideBrand, authorName);
+    return sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
   }
 
   const found = storage.findProjectBySlug(codeOrSlug);
   const proj = found ? found.project : null;
   const userDb = found ? storage.getUserDb(found.userId) : null;
   const authorName = (userDb && userDb.settings && userDb.settings.authorName) || (userDb && userDb.user && userDb.user.name) || 'Giffú';
+  const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
   const hideBrand = proj ? (proj.hideBrandName !== false) : true;
   const defaultTitle = hideBrand ? 'Cloud' : `${authorName} Cloud`;
   const title = proj ? proj.name : defaultTitle;
-  sendHtmlWithTitle(res, title, hideBrand, authorName);
+  sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
 });
 
 // Rota para shortlinks diretos ou slugs (ex: /59j640 ou /39ak804 ou /j3j643508j)
@@ -3342,6 +3364,7 @@ app.get('/:code', (req, res, next) => {
   if (resolved) {
     const { project, userDb, type, folderId, videoId } = resolved;
     const authorName = (userDb && userDb.settings && userDb.settings.authorName) || (userDb && userDb.user && userDb.user.name) || 'Giffú';
+    const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
     let hideBrand = project ? (project.hideBrandName !== false) : true;
     let title = project.name || (hideBrand ? 'Cloud' : `${authorName} Cloud`);
 
@@ -3358,7 +3381,7 @@ app.get('/:code', (req, res, next) => {
       }
       if (f) title = f.name || project.name;
     }
-    return sendHtmlWithTitle(res, title, hideBrand, authorName);
+    return sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
   }
   next();
 });
@@ -3368,6 +3391,7 @@ app.get('/entrega/:slug/:videoId', (req, res) => {
   const proj = found ? found.project : null;
   const userDb = found ? storage.getUserDb(found.userId) : null;
   const authorName = (userDb && userDb.settings && userDb.settings.authorName) || (userDb && userDb.user && userDb.user.name) || 'Giffú';
+  const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
   const video = proj && (proj.videos || []).find(v => v.id === req.params.videoId);
   let hideBrand = proj ? (proj.hideBrandName !== false) : true;
   if (video && video.hideBrandName !== undefined) {
@@ -3375,7 +3399,7 @@ app.get('/entrega/:slug/:videoId', (req, res) => {
   }
   const defaultTitle = hideBrand ? 'Cloud' : `${authorName} Cloud`;
   const title = video ? video.title : (proj ? proj.name : defaultTitle);
-  sendHtmlWithTitle(res, title, hideBrand, authorName);
+  sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
 });
 
 app.get('/:year/:slug', (req, res, next) => {
@@ -3384,10 +3408,11 @@ app.get('/:year/:slug', (req, res, next) => {
     const proj = found ? found.project : null;
     const userDb = found ? storage.getUserDb(found.userId) : null;
     const authorName = (userDb && userDb.settings && userDb.settings.authorName) || (userDb && userDb.user && userDb.user.name) || 'Giffú';
+    const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
     const hideBrand = proj ? (proj.hideBrandName !== false) : true;
     const defaultTitle = hideBrand ? 'Cloud' : `${authorName} Cloud`;
     const title = proj ? proj.name : defaultTitle;
-    return sendHtmlWithTitle(res, title, hideBrand, authorName);
+    return sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
   }
   next();
 });
@@ -3398,6 +3423,7 @@ app.get('/:year/:slug/:videoId', (req, res, next) => {
     const proj = found ? found.project : null;
     const userDb = found ? storage.getUserDb(found.userId) : null;
     const authorName = (userDb && userDb.settings && userDb.settings.authorName) || (userDb && userDb.user && userDb.user.name) || 'Giffú';
+    const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
     const video = proj && (proj.videos || []).find(v => v.id === req.params.videoId);
     let hideBrand = proj ? (proj.hideBrandName !== false) : true;
     if (video && video.hideBrandName !== undefined) {
@@ -3405,7 +3431,7 @@ app.get('/:year/:slug/:videoId', (req, res, next) => {
     }
     const defaultTitle = hideBrand ? 'Cloud' : `${authorName} Cloud`;
     const title = video ? video.title : (proj ? proj.name : defaultTitle);
-    return sendHtmlWithTitle(res, title, hideBrand, authorName);
+    return sendHtmlWithTitle(res, title, hideBrand, authorName, authorColor);
   }
   next();
 });
@@ -3419,10 +3445,22 @@ app.get(['/termos', '/terms'], (req, res) => {
 });
 
 app.get('/author', (req, res) => {
+  if (req.user && req.user.isAuthor) {
+    const userDb = storage.getUserDb(req.user.id);
+    const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
+    const authorName = (userDb && userDb.settings && userDb.settings.authorName) || (userDb && userDb.user && userDb.user.name) || 'Giffú';
+    return sendHtmlWithTitle(res, `${authorName} Cloud`, false, authorName, authorColor);
+  }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 app.get('/', (req, res) => {
+  if (req.user && req.user.isAuthor) {
+    const userDb = storage.getUserDb(req.user.id);
+    const authorColor = (userDb && userDb.settings && userDb.settings.defaultColor) || '#FF5400';
+    const authorName = (userDb && userDb.settings && userDb.settings.authorName) || (userDb && userDb.user && userDb.user.name) || 'Giffú';
+    return sendHtmlWithTitle(res, `${authorName} Cloud`, false, authorName, authorColor);
+  }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 

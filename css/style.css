@@ -2023,7 +2023,8 @@ body.is-dragging-directory .category-header {
   font-size: 20px;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 24px;
+  margin-top: 10px;
+  margin-bottom: 12px;
   letter-spacing: -0.3px;
 }
 

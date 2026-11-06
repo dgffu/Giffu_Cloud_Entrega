@@ -442,7 +442,31 @@ async function streamFile(req, res, readDB, fileId, { download = false, fileName
   }
 
   const headers = { Authorization: `Bearer ${token}` };
-  if (req.headers.range) headers.Range = req.headers.range;
+  const rawRange = req.headers.range;
+
+  if (rawRange) {
+    if (download) {
+      headers.Range = rawRange;
+    } else {
+      // Para streaming/reprodução de mídia: chunk-clamping de 3.5 MB
+      // Impede que o Google Drive tente descarregar arquivos de 500MB+ numa única conexão lenta,
+      // reduz o TTFB a milissegundos e elimina sobrecarga/congelamento no player
+      const rangeMatch = rawRange.match(/^bytes=(\d+)-(\d+)?$/i);
+      if (rangeMatch) {
+        const start = parseInt(rangeMatch[1], 10);
+        const clientEnd = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : null;
+        const STREAM_CHUNK_SIZE = 3.5 * 1024 * 1024; // 3.5 MB por fatia
+        if (clientEnd !== null && (clientEnd - start + 1) <= STREAM_CHUNK_SIZE) {
+          headers.Range = `bytes=${start}-${clientEnd}`;
+        } else {
+          const clampedEnd = start + STREAM_CHUNK_SIZE - 1;
+          headers.Range = `bytes=${start}-${clampedEnd}`;
+        }
+      } else {
+        headers.Range = rawRange;
+      }
+    }
+  }
 
   const upstream = https.request(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,

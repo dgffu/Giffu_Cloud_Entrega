@@ -307,7 +307,7 @@ class CustomVideoPlayer {
     if (!this.video) return;
     this.isPlaying = true;
     if (this.video.readyState < 3) {
-      this.setBuffering(true);
+      this.setBuffering(true, false);
     }
     const p = this.video.play();
     if (p && typeof p.catch === 'function') {
@@ -321,17 +321,37 @@ class CustomVideoPlayer {
   pause() {
     if (!this.video) return;
     this.video.pause();
+    this.setBuffering(false);
   }
 
-  setBuffering(isBuffering) {
-    this.isBuffering = Boolean(isBuffering);
-    const loadingEl = this.container ? this.container.querySelector('#playerCenterLoading') : null;
-    if (this.isBuffering) {
-      this.container?.classList.add('is-buffering');
-      if (loadingEl) loadingEl.style.display = 'flex';
-    } else {
+  setBuffering(isBuffering, immediate = false) {
+    if (this._bufferingTimer) {
+      clearTimeout(this._bufferingTimer);
+      this._bufferingTimer = null;
+    }
+
+    if (!isBuffering) {
+      this.isBuffering = false;
       this.container?.classList.remove('is-buffering');
+      const loadingEl = this.container ? this.container.querySelector('#playerCenterLoading') : null;
       if (loadingEl) loadingEl.style.display = 'none';
+      return;
+    }
+
+    const applyBufferingUi = () => {
+      if (this.video && !this.video.paused && this.video.readyState < 3) {
+        this.isBuffering = true;
+        this.container?.classList.add('is-buffering');
+        const loadingEl = this.container ? this.container.querySelector('#playerCenterLoading') : null;
+        if (loadingEl) loadingEl.style.display = 'flex';
+      }
+    };
+
+    if (immediate) {
+      applyBufferingUi();
+    } else {
+      // Tolerância com debounce de 380ms para absorver oscilações normais entre chunks sem congelar o player
+      this._bufferingTimer = setTimeout(applyBufferingUi, 380);
     }
   }
 
@@ -800,12 +820,12 @@ class CustomVideoPlayer {
     });
 
     this.video.addEventListener('waiting', () => {
-      this.setBuffering(true);
+      this.setBuffering(true, false);
     });
 
     this.video.addEventListener('seeking', () => {
       if (this.isPlaying) {
-        this.setBuffering(true);
+        this.setBuffering(true, false);
       }
     });
 
@@ -899,7 +919,7 @@ class CustomVideoPlayer {
       this.centerPlayBtn.classList.add('paused');
       this.centerPlayBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
       if (this.video.readyState < 3) {
-        this.setBuffering(true);
+        this.setBuffering(true, false);
       }
     });
 
@@ -1423,6 +1443,7 @@ class CustomVideoPlayer {
   }
 
   destroy() {
+    clearTimeout(this._bufferingTimer);
     clearTimeout(this.alphaPollTimer);
     clearTimeout(this.transcodePollTimer);
     clearTimeout(this.inactivityTimer);

@@ -2592,8 +2592,14 @@ function streamLocalRangeFile(req, res, filePath, customContentType = null, cust
       end = fileSize - 1;
     } else {
       start = parseInt(parts[0], 10);
-      end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-      if (end >= fileSize) end = fileSize - 1;
+      const requestedEnd = parts[1] ? parseInt(parts[1], 10) : null;
+      if (requestedEnd !== null) {
+        end = Math.min(requestedEnd, fileSize - 1);
+      } else {
+        // Range aberto para streaming: fatiamento de 4MB por chunk
+        const LOCAL_CHUNK_SIZE = 4 * 1024 * 1024;
+        end = forceDownload ? (fileSize - 1) : Math.min(start + LOCAL_CHUNK_SIZE - 1, fileSize - 1);
+      }
     }
 
     if (Number.isNaN(start) || Number.isNaN(end) || start < 0 || start >= fileSize || end < start) {

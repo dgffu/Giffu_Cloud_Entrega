@@ -2545,6 +2545,138 @@ async function ensureDriveWebCompatibleVideo(fileId, video, userDb) {
   return job;
 }
 
+// Solução 4: FastStart Automático em Segundo Plano para Arquivos Pesados (Moov Atom Fix)
+// Move o átomo moov para o byte 0 via FFmpeg stream copy (-c copy), sem reencodar nem perder qualidade
+const fastStartJobs = new Map();
+let activeFastStartCount = 0;
+const MAX_CONCURRENT_FASTSTART = 2;
+const fastStartQueue = [];
+
+function processNextFastStartQueue() {
+  if (activeFastStartCount >= MAX_CONCURRENT_FASTSTART || fastStartQueue.length === 0) return;
+  const nextTask = fastStartQueue.shift();
+  if (!nextTask) return;
+  activeFastStartCount++;
+  nextTask().finally(() => {
+    activeFastStartCount--;
+    processNextFastStartQueue();
+  });
+}
+
+function queueFastStartTask(taskFn) {
+  fastStartQueue.push(taskFn);
+  processNextFastStartQueue();
+}
+
+function applyFastStartToMp4(input, output) {
+  let ffmpegPath = 'ffmpeg';
+  try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
+
+  return new Promise((resolve, reject) => {
+    // -c copy: Cópia direta de vídeo e áudio sem reencodar, 100% fidelidade original e execução em segundos
+    // -movflags +faststart: reposiciona o índice moov no início do arquivo
+    const proc = spawn(ffmpegPath, [
+      '-y',
+      '-i', input,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      output
+    ]);
+
+    let errStr = '';
+    proc.stderr.on('data', d => errStr += d.toString());
+    proc.on('close', code => {
+      if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
+        resolve();
+      } else {
+        reject(new Error(`FastStart ffmpeg failed (code ${code}): ${errStr.slice(-250)}`));
+      }
+    });
+    proc.on('error', reject);
+  });
+}
+
+function ensureDriveFastStartBackground(fileId, video, userDb) {
+  const cachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}_faststart.mp4`);
+  if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+    return;
+  }
+  if (fastStartJobs.has(fileId)) {
+    return;
+  }
+
+  // Não processa áudio, imagens ou arquivos que já tenham versão web transcodificada
+  const webCacheOrig = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
+  if (fs.existsSync(webCacheOrig)) return;
+
+  const fileName = (video?.fileName || video?.title || '').toLowerCase();
+  const mime = (video?.mimeType || '').toLowerCase();
+  const isVideo = mime.startsWith('video/') || fileName.endsWith('.mp4') || fileName.endsWith('.mov') || fileName.endsWith('.m4v');
+  if (!isVideo) return;
+
+  fastStartJobs.set(fileId, true);
+
+  queueFastStartTask(async () => {
+    const tempSource = path.join(uploadTempDir, `src_fs_${fileId}_${Date.now()}.tmp`);
+    const tempTarget = path.join(uploadTempDir, `out_fs_${fileId}_${Date.now()}.mp4`);
+    try {
+      const stream = await driveApi.getFileStream(userDb, fileId);
+      const ws = fs.createWriteStream(tempSource);
+      stream.pipe(ws);
+      await new Promise((resolve, reject) => {
+        ws.on('finish', resolve);
+        ws.on('error', reject);
+        stream.on('error', reject);
+      });
+
+      if (!fs.existsSync(tempSource) || fs.statSync(tempSource).size === 0) {
+        return;
+      }
+
+      await applyFastStartToMp4(tempSource, tempTarget);
+      if (fs.existsSync(tempTarget) && fs.statSync(tempTarget).size > 0) {
+        fs.renameSync(tempTarget, cachePath);
+      }
+    } catch (err) {
+      console.warn(`[FastStart] Não foi possível aplicar faststart para (${fileId}):`, err.message);
+    } finally {
+      try { if (fs.existsSync(tempSource)) fs.unlinkSync(tempSource); } catch (e) {}
+      try { if (fs.existsSync(tempTarget)) fs.unlinkSync(tempTarget); } catch (e) {}
+      fastStartJobs.delete(fileId);
+    }
+  });
+}
+
+function ensureLocalFastStartBackground(filePath, fileKey) {
+  const cachePath = path.join(WEB_VIDEO_CACHE_DIR, `local_${fileKey}_faststart.mp4`);
+  if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+    return;
+  }
+  if (fastStartJobs.has(fileKey)) {
+    return;
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext !== '.mp4' && ext !== '.mov' && ext !== '.m4v') return;
+
+  fastStartJobs.set(fileKey, true);
+
+  queueFastStartTask(async () => {
+    const tempTarget = path.join(uploadTempDir, `out_local_fs_${fileKey}_${Date.now()}.mp4`);
+    try {
+      await applyFastStartToMp4(filePath, tempTarget);
+      if (fs.existsSync(tempTarget) && fs.statSync(tempTarget).size > 0) {
+        fs.renameSync(tempTarget, cachePath);
+      }
+    } catch (err) {
+      console.warn(`[FastStart] Não foi possível aplicar faststart local (${fileKey}):`, err.message);
+    } finally {
+      try { if (fs.existsSync(tempTarget)) fs.unlinkSync(tempTarget); } catch (e) {}
+      fastStartJobs.delete(fileKey);
+    }
+  });
+}
+
 function streamLocalRangeFile(req, res, filePath, customContentType = null, customFileName = null, forceDownload = false) {
   let stat;
   try {
@@ -2792,6 +2924,10 @@ app.get('/api/stream/alpha-status', async (req, res) => {
 app.get('/api/stream/video-status', async (req, res) => {
   if (req.query.drive) {
     const fileId = String(req.query.drive);
+    const fastStartPath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}_faststart.mp4`);
+    if (fs.existsSync(fastStartPath) && fs.statSync(fastStartPath).size > 0) {
+      return res.json({ ready: true, converting: false, needsTranscode: true, isFastStart: true });
+    }
     const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
     if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
       return res.json({ ready: true, converting: false, needsTranscode: true });
@@ -2832,6 +2968,10 @@ app.get('/api/stream/video-status', async (req, res) => {
     const stat = fs.statSync(resolvedFilePath);
     const crypto = require('crypto');
     const fileKey = crypto.createHash('md5').update(`${resolvedFilePath}_${stat.size}_${stat.mtimeMs}`).digest('hex');
+    const fastStartPath = path.join(WEB_VIDEO_CACHE_DIR, `local_${fileKey}_faststart.mp4`);
+    if (fs.existsSync(fastStartPath) && fs.statSync(fastStartPath).size > 0) {
+      return res.json({ ready: true, converting: false, needsTranscode: true, isFastStart: true });
+    }
     const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `local_${fileKey}.mp4`);
     if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
       return res.json({ ready: true, converting: false, needsTranscode: true });
@@ -3064,8 +3204,15 @@ app.get('/api/stream', async (req, res) => {
       }
     }
 
-    // Se NÃO é download, verifica se há versão otimizada em MP4 (H.264 + AAC) para codecs pesados/não-nativos como ProRes
+    // Se NÃO é download, verifica se há versão otimizada em MP4 (FastStart ou transcode ProRes)
     if (!isDownload) {
+      // 1. Versão FastStart instantânea (moov atom no byte 0, zero buffer no SSD)
+      const fastStartPath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}_faststart.mp4`);
+      if (fs.existsSync(fastStartPath) && fs.statSync(fastStartPath).size > 0) {
+        return streamLocalRangeFile(req, res, fastStartPath, 'video/mp4');
+      }
+
+      // 2. Versão transcodificada compatível (ProRes / DNxHD)
       const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
       if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
         return streamLocalRangeFile(req, res, webCachePath, 'video/mp4');
@@ -3084,6 +3231,10 @@ app.get('/api/stream', async (req, res) => {
         } catch (err) {
           console.error('Falha ao converter ProRes drive:', err.message);
         }
+      } else if (video && video.type !== 'audio' && !mime.startsWith('audio/') && !mime.startsWith('image/')) {
+        // Solução 4: FastStart em segundo plano (-c copy, sem reencodar)
+        // enquanto o usuário assiste instantaneamente aos blocos de 3.5MB via Drive
+        ensureDriveFastStartBackground(fileId, video, userDb);
       }
     }
 
@@ -3186,12 +3337,17 @@ app.get('/api/stream', async (req, res) => {
     }
   }
 
-  // Se NÃO é download, verifica se o vídeo local é ProRes / codec não suportado pelo navegador e precisa de versão web
+  // Se NÃO é download, verifica se o vídeo local tem versão FastStart ou precisa de versão web
   if (!isDownload) {
     try {
       const stat = fs.statSync(resolvedFilePath);
       const crypto = require('crypto');
       const fileKey = crypto.createHash('md5').update(`${resolvedFilePath}_${stat.size}_${stat.mtimeMs}`).digest('hex');
+      const fastStartPath = path.join(WEB_VIDEO_CACHE_DIR, `local_${fileKey}_faststart.mp4`);
+      if (fs.existsSync(fastStartPath) && fs.statSync(fastStartPath).size > 0) {
+        return streamLocalRangeFile(req, res, fastStartPath, 'video/mp4');
+      }
+
       const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `local_${fileKey}.mp4`);
       if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
         return streamLocalRangeFile(req, res, webCachePath, 'video/mp4');
@@ -3201,6 +3357,9 @@ app.get('/api/stream', async (req, res) => {
       if (webPath && fs.existsSync(webPath) && fs.statSync(webPath).size > 0) {
         return streamLocalRangeFile(req, res, webPath, 'video/mp4');
       }
+
+      // Agenda FastStart local em segundo plano
+      ensureLocalFastStartBackground(resolvedFilePath, fileKey);
     } catch (e) {
       console.error('Erro na conversão web local:', e.message);
     }

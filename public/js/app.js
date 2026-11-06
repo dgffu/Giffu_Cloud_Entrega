@@ -10205,6 +10205,16 @@ class EntregaApp {
     const modal = document.getElementById('modalEditProject');
     if (!modal) return;
 
+    const loaderEl = document.getElementById('editDirectoryLoading');
+    if (loaderEl) loaderEl.style.display = 'none';
+    const submitBtn = document.getElementById('btnSubmitEditProject');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = '';
+      submitBtn.style.cursor = '';
+      submitBtn.textContent = 'Salvar Alterações';
+    }
+
     this.updateBrandElements();
 
     const defaultCat = (this.getCategories()[0] && this.getCategories()[0].name) || 'Categoria Padrão';
@@ -12064,7 +12074,27 @@ class EntregaApp {
         ? document.getElementById('editProjAllowShare').checked
         : true;
 
+      const loaderEl = document.getElementById('editDirectoryLoading');
+      const submitBtn = document.getElementById('btnSubmitEditProject') || e.target.querySelector('button[type="submit"]');
+      const cancelBtn = e.target.querySelector('.btn-modal-cancel');
+      const archiveBtn = document.getElementById('btnToggleArchiveProject');
+
       try {
+        if (loaderEl) loaderEl.style.display = 'flex';
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.style.opacity = '0.7';
+          submitBtn.style.cursor = 'not-allowed';
+        }
+        if (cancelBtn) {
+          cancelBtn.disabled = true;
+          cancelBtn.style.pointerEvents = 'none';
+        }
+        if (archiveBtn) {
+          archiveBtn.disabled = true;
+          archiveBtn.style.pointerEvents = 'none';
+        }
+
         if (driveLink && window.Auth && !window.Auth.driveConnected) {
           const user = await window.Auth.signIn('author');
           if (user) this.authorSession = user;
@@ -12095,6 +12125,21 @@ class EntregaApp {
         }
       } catch (err) {
         alert(err.message || 'Erro ao atualizar diretório');
+      } finally {
+        if (loaderEl) loaderEl.style.display = 'none';
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.style.opacity = '';
+          submitBtn.style.cursor = '';
+        }
+        if (cancelBtn) {
+          cancelBtn.disabled = false;
+          cancelBtn.style.pointerEvents = '';
+        }
+        if (archiveBtn) {
+          archiveBtn.disabled = false;
+          archiveBtn.style.pointerEvents = '';
+        }
       }
     });
 

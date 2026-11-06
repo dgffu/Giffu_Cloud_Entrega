@@ -8401,6 +8401,51 @@ class EntregaApp {
         }
       }
 
+      // Suporte direto para salvar no Fotos/Galeria do iPhone/Android ao baixar foto individual
+      const handleSinglePhotoMobileDownload = async (e) => {
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
+        if (isMobile && navigator.canShare && typeof navigator.share === 'function') {
+          e.preventDefault();
+          const targetPhoto = this.currentPhoto || vid;
+          try {
+            window.showToast('Preparando foto para salvar no Fotos/Galeria...');
+            const streamUrl = `${targetPhoto.url}${targetPhoto.url.includes('?') ? '&' : '?'}download=1`;
+            const res = await fetch(streamUrl);
+            if (!res.ok) throw new Error('Falha ao baixar arquivo');
+            const blob = await res.blob();
+            let ext = this.getFileExtension(targetPhoto) || '';
+            if (ext.startsWith('.')) ext = ext.slice(1);
+            if (!ext) ext = 'jpg';
+            let fileName = targetPhoto.fileName || targetPhoto.title || 'foto';
+            if (!fileName.toLowerCase().endsWith('.' + ext.toLowerCase())) fileName = `${fileName}.${ext}`;
+            let mime = blob.type;
+            const lName = fileName.toLowerCase();
+            if (!mime || mime === 'application/octet-stream') {
+              if (lName.endsWith('.jpg') || lName.endsWith('.jpeg')) mime = 'image/jpeg';
+              else if (lName.endsWith('.png')) mime = 'image/png';
+              else if (lName.endsWith('.webp')) mime = 'image/webp';
+              else mime = 'image/jpeg';
+            }
+            const fileObj = new File([blob], fileName, { type: mime, lastModified: Date.now() });
+            if (navigator.canShare({ files: [fileObj] })) {
+              await navigator.share({
+                files: [fileObj],
+                title: fileName
+              });
+              window.showToast('Salvo com sucesso no Fotos/Galeria!');
+              return;
+            }
+          } catch (err) {
+            if (err.name === 'AbortError') return;
+            console.warn('Share individual falhou:', err);
+          }
+          window.location.href = `${targetPhoto.url}${targetPhoto.url.includes('?') ? '&' : '?'}download=1`;
+        }
+      };
+
+      document.getElementById('btnDownloadPhotoAction')?.addEventListener('click', handleSinglePhotoMobileDownload);
+      document.getElementById('btnHeaderDownloadMedia')?.addEventListener('click', handleSinglePhotoMobileDownload);
+
       this.playerInstance = null;
     } else if (isAudio) {
       // Initialize Audio Player
@@ -9159,7 +9204,7 @@ class EntregaApp {
   }
 
   async downloadLooseFiles(proj, targetItems, modal) {
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
     const progressEl = document.getElementById('batchDownloadProgress');
     const fillEl = document.getElementById('batchProgressFill');
     const statusEl = document.getElementById('batchProgressStatus');
@@ -9168,7 +9213,7 @@ class EntregaApp {
 
     const total = targetItems.length;
 
-    // Mobile Web Share API option for saving directly to Photos / Gallery without confirmation
+    // Mobile Web Share API option for saving directly to Photos / Gallery
     if (isMobile && navigator.canShare && typeof navigator.share === 'function') {
       try {
         if (statusEl) statusEl.textContent = 'Preparando arquivos para salvar no Fotos/Galeria...';
@@ -9176,26 +9221,58 @@ class EntregaApp {
         for (let i = 0; i < total; i++) {
           const item = targetItems[i];
           const streamUrl = `${item.url}${item.url.includes('?') ? '&' : '?'}download=1`;
-          if (fillEl) fillEl.style.width = `${Math.round(((i + 1) / total) * 60)}%`;
+          if (fillEl) fillEl.style.width = `${Math.round(((i + 1) / total) * 70)}%`;
           if (statusEl) statusEl.textContent = `Carregando ${i + 1} de ${total}: ${item.fileName || item.title}...`;
 
           const response = await fetch(streamUrl);
-          if (!response.ok) throw new Error(`Falha ao obter arquivo ${item.title}`);
-          const isImg = item.type === 'image';
+          if (!response.ok) throw new Error(`Falha ao obter arquivo ${item.fileName || item.title}`);
+          const blob = await response.blob();
+          const isImg = item.type === 'image' || (blob.type && blob.type.startsWith('image/'));
+          const isVid = item.type === 'video' || (blob.type && blob.type.startsWith('video/'));
           const isArch = item.type === 'archive';
           const isFl = item.type === 'file';
-          const defaultExt = isImg ? 'jpg' : ((isArch || isFl) ? (item.extension ? item.extension.replace('.', '') : (isArch ? 'zip' : 'file')) : 'mp4');
-          const fileName = item.fileName || `${item.title}.${defaultExt}`;
-          const mime = blob.type || (isImg ? 'image/jpeg' : ((isArch || isFl) ? 'application/octet-stream' : 'video/mp4'));
-          fileObjects.push(new File([blob], fileName, { type: mime }));
+
+          let ext = this.getFileExtension(item) || '';
+          if (ext.startsWith('.')) ext = ext.slice(1);
+          if (!ext) {
+            ext = isImg ? 'jpg' : (isVid ? 'mp4' : ((isArch || isFl) ? (item.extension ? item.extension.replace('.', '') : (isArch ? 'zip' : 'file')) : 'mp4'));
+          }
+
+          let fileName = item.fileName || item.title || `arquivo_${i + 1}`;
+          if (!fileName.toLowerCase().endsWith('.' + ext.toLowerCase())) {
+            fileName = `${fileName}.${ext}`;
+          }
+
+          let mime = blob.type;
+          const lowerName = fileName.toLowerCase();
+          if (!mime || mime === 'application/octet-stream') {
+            if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mime = 'image/jpeg';
+            else if (lowerName.endsWith('.png')) mime = 'image/png';
+            else if (lowerName.endsWith('.webp')) mime = 'image/webp';
+            else if (lowerName.endsWith('.gif')) mime = 'image/gif';
+            else if (lowerName.endsWith('.mp4')) mime = 'video/mp4';
+            else if (lowerName.endsWith('.mov')) mime = 'video/quicktime';
+            else if (lowerName.endsWith('.mp3')) mime = 'audio/mpeg';
+            else if (lowerName.endsWith('.pdf')) mime = 'application/pdf';
+            else mime = isImg ? 'image/jpeg' : (isVid ? 'video/mp4' : 'application/octet-stream');
+          }
+
+          fileObjects.push(new File([blob], fileName, { type: mime, lastModified: Date.now() }));
         }
 
-        if (navigator.canShare({ files: fileObjects })) {
+        let canShare = false;
+        try {
+          canShare = navigator.canShare({ files: fileObjects });
+        } catch (e) {
+          canShare = false;
+        }
+
+        if (canShare) {
           if (fillEl) fillEl.style.width = '100%';
-          if (statusEl) statusEl.textContent = 'Toque em "Salvar Imagens / Vídeos" na folha para salvar no Fotos/Galeria!';
+          if (statusEl) statusEl.textContent = 'Toque em "Salvar Imagens / Vídeos" na janela para salvar no Fotos/Galeria!';
           await navigator.share({
             files: fileObjects,
-            title: proj.name
+            title: proj.name || 'Fotos'
           });
           window.showToast('Salvo com sucesso no Fotos/Galeria!');
           if (modal) {
@@ -9215,11 +9292,19 @@ class EntregaApp {
     // Direct sequential downloads (PC, Mac, and Mobile fallback)
     for (let i = 0; i < total; i++) {
       const item = targetItems[i];
+      const streamUrl = `${item.url}${item.url.includes('?') ? '&' : '?'}download=1`;
       const isImg = item.type === 'image';
       const isArch = item.type === 'archive';
       const isFl = item.type === 'file';
-      const defaultExt = isImg ? 'jpg' : ((isArch || isFl) ? (item.extension ? item.extension.replace('.', '') : (isArch ? 'zip' : 'file')) : 'mp4');
-      const fileName = item.fileName || `${item.title}.${defaultExt}`;
+      let ext = this.getFileExtension(item) || '';
+      if (ext.startsWith('.')) ext = ext.slice(1);
+      if (!ext) {
+        ext = isImg ? 'jpg' : ((isArch || isFl) ? (item.extension ? item.extension.replace('.', '') : (isArch ? 'zip' : 'file')) : 'mp4');
+      }
+      let fileName = item.fileName || item.title || `arquivo_${i + 1}`;
+      if (!fileName.toLowerCase().endsWith('.' + ext.toLowerCase())) {
+        fileName = `${fileName}.${ext}`;
+      }
 
       if (fillEl) fillEl.style.width = `${Math.round(((i + 1) / total) * 100)}%`;
       if (statusEl) statusEl.textContent = `Baixando ${i + 1} de ${total}: ${fileName}...`;
@@ -9235,7 +9320,7 @@ class EntregaApp {
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
         } else {
           const link = document.createElement('a');
           link.href = streamUrl;
@@ -9254,7 +9339,7 @@ class EntregaApp {
       }
 
       if (i < total - 1) {
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 600));
       }
     }
 

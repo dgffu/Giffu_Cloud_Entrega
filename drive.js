@@ -430,6 +430,93 @@ async function mirrorFolder(readDB, link, classifyResolution) {
   };
 }
 
+// ---------- Read-Ahead RAM Cache para Mobile (Zero Disco, Latência Zero entre Chunks) ----------
+const MOBILE_BLOCK_SIZE = 8 * 1024 * 1024; // 8 MB por bloco em RAM
+const MAX_RAM_BLOCKS = 6; // Máximo ~48 MB em RAM no total, expira em 60s
+const mobileBlockCache = new Map(); // key -> { buffer, start, end, totalSize, contentType, ts }
+const mobileInflightBlocks = new Map(); // key -> Promise
+
+function pruneMobileBlockCache() {
+  const now = Date.now();
+  for (const [k, v] of mobileBlockCache.entries()) {
+    if (now - v.ts > 60000) mobileBlockCache.delete(k);
+  }
+  while (mobileBlockCache.size > MAX_RAM_BLOCKS) {
+    const oldestKey = mobileBlockCache.keys().next().value;
+    if (oldestKey) mobileBlockCache.delete(oldestKey);
+    else break;
+  }
+}
+
+function prefetchDriveBlockToRam(token, fileId, blockStart, totalSizeHint = null) {
+  if (totalSizeHint && blockStart >= totalSizeHint) return null;
+  const key = `${fileId}:${blockStart}`;
+  if (mobileBlockCache.has(key)) {
+    mobileBlockCache.get(key).ts = Date.now();
+    return Promise.resolve(mobileBlockCache.get(key));
+  }
+  if (mobileInflightBlocks.has(key)) {
+    return mobileInflightBlocks.get(key);
+  }
+
+  const blockEnd = totalSizeHint
+    ? Math.min(blockStart + MOBILE_BLOCK_SIZE - 1, totalSizeHint - 1)
+    : (blockStart + MOBILE_BLOCK_SIZE - 1);
+
+  const p = new Promise((resolve) => {
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Range: `bytes=${blockStart}-${blockEnd}`
+    };
+    const reqUp = https.request(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+      { method: 'GET', headers, timeout: 45000, agent: google.keepAliveAgent },
+      (ures) => {
+        if (ures.statusCode !== 206 && ures.statusCode !== 200) {
+          ures.resume();
+          return resolve(null);
+        }
+        const cr = String(ures.headers['content-range'] || '');
+        const crMatch = cr.match(/bytes\s+(\d+)-(\d+)\/(\d+)/i);
+        const actualStart = crMatch ? parseInt(crMatch[1], 10) : blockStart;
+        const actualEnd = crMatch ? parseInt(crMatch[2], 10) : blockEnd;
+        const totalSize = crMatch ? parseInt(crMatch[3], 10) : (parseInt(ures.headers['content-length'] || '0', 10) || 0);
+        const contentType = String(ures.headers['content-type'] || 'video/mp4').toLowerCase();
+
+        const chunks = [];
+        ures.on('data', (c) => chunks.push(c));
+        ures.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          if (buffer.length > 0) {
+            pruneMobileBlockCache();
+            const entry = {
+              buffer,
+              start: actualStart,
+              end: actualStart + buffer.length - 1,
+              totalSize: totalSize || (actualStart + buffer.length),
+              contentType,
+              ts: Date.now()
+            };
+            mobileBlockCache.set(key, entry);
+            resolve(entry);
+          } else {
+            resolve(null);
+          }
+        });
+        ures.on('error', () => resolve(null));
+      }
+    );
+    reqUp.on('timeout', () => reqUp.destroy());
+    reqUp.on('error', () => resolve(null));
+    reqUp.end();
+  }).finally(() => {
+    mobileInflightBlocks.delete(key);
+  });
+
+  mobileInflightBlocks.set(key, p);
+  return p;
+}
+
 // Transmite o arquivo (vídeo ou imagem) do Drive para o navegador com suporte a Range (HTTP 206)
 async function streamFile(req, res, readDB, fileId, { download = false, fileName = 'arquivo', mimeType = null } = {}) {
   if (!ID_RE.test(fileId)) return res.status(400).send('ID de arquivo inválido');
@@ -441,21 +528,82 @@ async function streamFile(req, res, readDB, fileId, { download = false, fileName
     return res.status(503).send(err.message);
   }
 
-  const headers = { Authorization: `Bearer ${token}` };
-  const rawRange = req.headers.range;
-
-  // Solução A: Stream contínuo aberto (Open-Ended HTTP 206) sem corte artificial de blocos.
-  // Repassa o Range nativo solicitado pelo navegador diretamente ao Google Drive, permitindo que
-  // a janela TCP escale até a banda máxima sem interromper a conexão a cada poucos segundos.
-  if (rawRange) {
-    headers.Range = rawRange;
-  }
-
   if (req.socket && typeof req.socket.setNoDelay === 'function') {
     req.socket.setNoDelay(true);
   }
   if (res.socket && typeof res.socket.setNoDelay === 'function') {
     res.socket.setNoDelay(true);
+  }
+
+  const headers = { Authorization: `Bearer ${token}` };
+  const rawRange = req.headers.range;
+  const ua = String(req.headers['user-agent'] || '');
+  const isMobileUa = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+
+  //No Mobile (iOS Safari / Android Chrome):
+  // Navegadores mobile abortam streams gigantes de 385MB para poupar RAM, o que quebrava o Keep-Alive.
+  // Usamos blocos de 8MB alinhados + Read-Ahead Prefetch em RAM do bloco seguinte (0ms de espera no próximo chunk).
+  if (!download && isMobileUa && rawRange) {
+    const rangeMatch = rawRange.match(/^bytes=(\d+)-(\d+)?$/i);
+    if (rangeMatch) {
+      const start = parseInt(rangeMatch[1], 10);
+      const clientEnd = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : null;
+      const blockIdx = Math.floor(start / MOBILE_BLOCK_SIZE);
+      const blockStart = blockIdx * MOBILE_BLOCK_SIZE;
+      const blockEnd = blockStart + MOBILE_BLOCK_SIZE - 1;
+      const blockKey = `${fileId}:${blockStart}`;
+
+      pruneMobileBlockCache();
+
+      // Se o bloco já estiver em RAM (ou terminando de chegar via prefetch), entrega em 0ms direto da RAM!
+      let cachedEntry = mobileBlockCache.get(blockKey);
+      if (!cachedEntry && mobileInflightBlocks.has(blockKey)) {
+        cachedEntry = await mobileInflightBlocks.get(blockKey);
+      }
+
+      if (cachedEntry && start >= cachedEntry.start && start <= cachedEntry.end) {
+        cachedEntry.ts = Date.now();
+        const actualEnd = clientEnd !== null
+          ? Math.min(clientEnd, cachedEntry.end)
+          : cachedEntry.end;
+        const sliceStart = start - cachedEntry.start;
+        const sliceEnd = actualEnd - cachedEntry.start + 1;
+        const slice = cachedEntry.buffer.subarray(sliceStart, sliceEnd);
+
+        // Dispara prefetch assíncrono do próximo bloco de 8MB em RAM enquanto o celular reproduz este
+        const nextBlockStart = (blockIdx + 1) * MOBILE_BLOCK_SIZE;
+        if (nextBlockStart < cachedEntry.totalSize) {
+          prefetchDriveBlockToRam(token, fileId, nextBlockStart, cachedEntry.totalSize);
+        }
+
+        res.writeHead(206, {
+          'Content-Type': mimeType || cachedEntry.contentType || 'video/mp4',
+          'Accept-Ranges': 'bytes',
+          'Content-Range': `bytes ${start}-${actualEnd}/${cachedEntry.totalSize}`,
+          'Content-Length': slice.length,
+          'Cache-Control': 'private, max-age=3600',
+          'Content-Disposition': 'inline'
+        });
+        return res.end(slice);
+      }
+
+      // Se ainda não está em RAM: limita o range deste request ao fim do bloco de 8MB para preservar o Keep-Alive TLS
+      const targetEnd = (clientEnd !== null && clientEnd < blockEnd) ? clientEnd : blockEnd;
+      headers.Range = `bytes=${start}-${targetEnd}`;
+
+      // Se não for apenas o probe de 2 bytes (bytes=0-1 do Safari), já dispara prefetch do próximo bloco (ou do bloco 0)
+      if (clientEnd !== null && (clientEnd - start) <= 4) {
+        prefetchDriveBlockToRam(token, fileId, 0);
+      } else {
+        const nextBlockStart = (blockIdx + 1) * MOBILE_BLOCK_SIZE;
+        prefetchDriveBlockToRam(token, fileId, nextBlockStart);
+      }
+    } else {
+      headers.Range = rawRange;
+    }
+  } else if (rawRange) {
+    // No PC / Desktop: Stream contínuo aberto (Open-Ended HTTP 206) com velocidade máxima
+    headers.Range = rawRange;
   }
 
   const upstream = https.request(
@@ -534,6 +682,7 @@ async function streamFile(req, res, readDB, fileId, { download = false, fileName
       const out = {
         'Content-Type': contentType,
         'Accept-Ranges': 'bytes',
+        'Cache-Control': download ? 'no-store' : 'private, max-age=3600',
         'Content-Disposition': download
           ? `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`
           : 'inline'

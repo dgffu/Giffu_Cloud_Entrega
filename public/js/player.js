@@ -355,8 +355,29 @@ class CustomVideoPlayer {
     }
   }
 
-  updateBufferProgress() {
+  getBufferedAhead() {
+    if (!this.video) return 0;
+    const b = this.video.buffered;
+    if (!b || b.length === 0) return 0;
+    const cur = this.video.currentTime || 0;
+    let maxAhead = 0;
+    for (let i = 0; i < b.length; i++) {
+      const start = b.start(i);
+      const end = b.end(i);
+      if (cur >= (start - 0.5) && end > cur) {
+        maxAhead = Math.max(maxAhead, end - cur);
+      }
+    }
+    return maxAhead;
+  }
+
+  updateBufferProgress(throttled = false) {
     if (!this.video || !this.bufferBar) return;
+    if (throttled) {
+      const now = Date.now();
+      if (this._lastBufferUiUpdate && (now - this._lastBufferUiUpdate) < 300) return;
+      this._lastBufferUiUpdate = now;
+    }
     const dur = this.video.duration || 0;
     if (dur <= 0) {
       this.bufferBar.style.width = '0%';
@@ -900,6 +921,15 @@ class CustomVideoPlayer {
     this.video.addEventListener('canplay', () => {
       const overlay = this.container.querySelector('#alphaTranscodeOverlay');
       if (overlay) overlay.style.display = 'none';
+      const isMob = this.isMobileDevice();
+      const ahead = this.getBufferedAhead();
+      // No mobile, se houve queda de buffer (_mobileWaitingForCushion), aguarda acumular ao menos 2.2s
+      // de frente antes de retomar para evitar micro-engasgos repetitivos a cada 0.1s
+      if (isMob && this._mobileWaitingForCushion && ahead < 2.2 && this.video.readyState < 4) {
+        this.updateBufferProgress();
+        return;
+      }
+      this._mobileWaitingForCushion = false;
       if (this.video.readyState >= 3) {
         this.setBuffering(false);
       }
@@ -910,6 +940,7 @@ class CustomVideoPlayer {
     });
 
     this.video.addEventListener('canplaythrough', () => {
+      this._mobileWaitingForCushion = false;
       this.setBuffering(false);
       if (this.isPlaying && this.video.paused) {
         this.video.play().catch(() => {});
@@ -918,6 +949,9 @@ class CustomVideoPlayer {
     });
 
     this.video.addEventListener('waiting', () => {
+      if (this.isMobileDevice()) {
+        this._mobileWaitingForCushion = true;
+      }
       this.setBuffering(true, false);
       this.updateBufferProgress();
     });
@@ -1041,9 +1075,10 @@ class CustomVideoPlayer {
     // Time update & Progress bar
     this.video.addEventListener('timeupdate', () => {
       if (this.isBuffering && !this.video.paused) {
+        this._mobileWaitingForCushion = false;
         this.setBuffering(false);
       }
-      this.updateBufferProgress();
+      this.updateBufferProgress(true);
       if (this.isSeeking) return;
       const cur = this.video.currentTime;
       const dur = this.video.duration || 0;
@@ -1060,6 +1095,13 @@ class CustomVideoPlayer {
     // Buffer progress
     this.video.addEventListener('progress', () => {
       this.updateBufferProgress();
+      if (this._mobileWaitingForCushion && this.getBufferedAhead() >= 2.2) {
+        this._mobileWaitingForCushion = false;
+        this.setBuffering(false);
+        if (this.isPlaying && this.video.paused) {
+          this.video.play().catch(() => {});
+        }
+      }
     });
 
     // Scrubber click & drag (compatível com modo normal e rotacionado 90deg no mobile, mouse e touch)

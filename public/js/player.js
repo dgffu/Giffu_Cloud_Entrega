@@ -343,7 +343,10 @@ class CustomVideoPlayer {
   }
 
   togglePlay() {
-    if (this.video.paused || this.video.ended) {
+    if (this.video.ended) {
+      this.video.currentTime = 0;
+      this.play();
+    } else if (this.video.paused) {
       this.play();
     } else {
       this.pause();
@@ -352,6 +355,9 @@ class CustomVideoPlayer {
 
   play() {
     if (!this.video) return;
+    if (this.video.ended) {
+      this.video.currentTime = 0;
+    }
     this.isPlaying = true;
     if (this.video.readyState < 3) {
       this.setBuffering(true, false);
@@ -973,9 +979,14 @@ class CustomVideoPlayer {
       if (overlay) overlay.style.display = 'none';
       const isMob = this.isMobileDevice();
       const ahead = this.getBufferedAhead();
-      // No mobile, se houve queda de buffer (_mobileWaitingForCushion), aguarda acumular ao menos 2.2s
-      // de frente antes de retomar para evitar micro-engasgos repetitivos a cada 0.1s
-      if (isMob && this._mobileWaitingForCushion && ahead < 2.2 && this.video.readyState < 4) {
+      const dur = this.video.duration || 0;
+      const cur = this.video.currentTime || 0;
+      const remaining = Math.max(0, dur - cur);
+      const cushionNeeded = Math.min(2.0, remaining);
+
+      // No mobile, se houve queda de buffer (_mobileWaitingForCushion), aguarda acumular margem de frente
+      // proporcional ao tempo restante do vídeo (evita congelamento caso reste menos de 2s para o fim)
+      if (isMob && this._mobileWaitingForCushion && ahead < cushionNeeded && remaining > 0.3 && this.video.readyState < 4) {
         this.updateBufferProgress();
         return;
       }
@@ -983,7 +994,7 @@ class CustomVideoPlayer {
       if (this.video.readyState >= 3) {
         this.setBuffering(false);
       }
-      if (this.isPlaying && this.video.paused) {
+      if (!this.isSeeking && this.isPlaying && this.video.paused) {
         this.video.play().catch(() => {});
       }
       this.resyncAudio(false);
@@ -993,7 +1004,7 @@ class CustomVideoPlayer {
     this.video.addEventListener('canplaythrough', () => {
       this._mobileWaitingForCushion = false;
       this.setBuffering(false);
-      if (this.isPlaying && this.video.paused) {
+      if (!this.isSeeking && this.isPlaying && this.video.paused) {
         this.video.play().catch(() => {});
       }
       this.resyncAudio(false);
@@ -1026,7 +1037,8 @@ class CustomVideoPlayer {
       if (this.video.readyState >= 3) {
         this.setBuffering(false);
       }
-      if (this.isPlaying && this.video.paused) {
+      // Durante o arrasto da timeline (isSeeking ativo), não retoma o play prematuramente
+      if (!this.isSeeking && this.isPlaying && this.video.paused) {
         this.video.play().catch(() => {});
       }
       this.resyncAudio(false);
@@ -1148,6 +1160,23 @@ class CustomVideoPlayer {
       this.centerPlayBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
     });
 
+    this.video.addEventListener('ended', () => {
+      this.isPlaying = false;
+      this._mobileWaitingForCushion = false;
+      this.setBuffering(false);
+      const dur = this.video.duration || 0;
+      this.progressBar.style.width = '100%';
+      this.scrubberHandle.style.left = '100%';
+      if (dur > 0) {
+        this.timecodeDisplay.textContent = `${this.formatTime(dur)} / ${this.formatTime(dur)}`;
+      }
+      this.showHUD();
+      this.container.classList.add('paused');
+      this.playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+      this.centerPlayBtn.classList.remove('paused');
+      this.centerPlayBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+    });
+
     // Time update & Progress bar
     this.video.addEventListener('timeupdate', () => {
       if (this.isBuffering && !this.video.paused) {
@@ -1171,11 +1200,17 @@ class CustomVideoPlayer {
     // Buffer progress
     this.video.addEventListener('progress', () => {
       this.updateBufferProgress();
-      if (this._mobileWaitingForCushion && this.getBufferedAhead() >= 2.2) {
-        this._mobileWaitingForCushion = false;
-        this.setBuffering(false);
-        if (this.isPlaying && this.video.paused) {
-          this.video.play().catch(() => {});
+      if (this._mobileWaitingForCushion) {
+        const dur = this.video.duration || 0;
+        const cur = this.video.currentTime || 0;
+        const remaining = Math.max(0, dur - cur);
+        const cushionNeeded = Math.min(2.0, remaining);
+        if (this.getBufferedAhead() >= cushionNeeded || remaining <= 0.3) {
+          this._mobileWaitingForCushion = false;
+          this.setBuffering(false);
+          if (!this.isSeeking && this.isPlaying && this.video.paused) {
+            this.video.play().catch(() => {});
+          }
         }
       }
     });
@@ -1190,6 +1225,7 @@ class CustomVideoPlayer {
     };
 
     this.isSeeking = false;
+    this._wasPlayingBeforeSeek = false;
     this._lastSeekCommitTime = 0;
     this._pendingSeekRatio = null;
 
@@ -1231,15 +1267,27 @@ class CustomVideoPlayer {
         this.isSeeking = false;
         this.isInteracting = false;
         this._pendingSeekRatio = null;
+        if (this._wasPlayingBeforeSeek) {
+          this._wasPlayingBeforeSeek = false;
+          this.play();
+        }
         this.showHUD();
       }
     };
 
-    this.timelineWrapper.addEventListener('mousedown', (e) => {
+    const startTimelineSeek = (clientX, clientY) => {
       this.isSeeking = true;
       this.isInteracting = true;
+      this._wasPlayingBeforeSeek = this.isPlaying && !this.video.paused;
+      if (this._wasPlayingBeforeSeek) {
+        this.video.pause();
+      }
       this.showHUD();
-      handleTimelineSeek(e.clientX, e.clientY, true);
+      handleTimelineSeek(clientX, clientY, true);
+    };
+
+    this.timelineWrapper.addEventListener('mousedown', (e) => {
+      startTimelineSeek(e.clientX, e.clientY);
     });
 
     this.onTimelineMouseMove = (e) => {
@@ -1257,28 +1305,24 @@ class CustomVideoPlayer {
 
     this.timelineWrapper.addEventListener('touchstart', (e) => {
       if (e.touches && e.touches.length > 0) {
-        this.isSeeking = true;
-        this.isInteracting = true;
-        this.showHUD();
-        handleTimelineSeek(e.touches[0].clientX, e.touches[0].clientY, true);
+        startTimelineSeek(e.touches[0].clientX, e.touches[0].clientY);
       }
     }, { passive: true });
 
-    this.timelineWrapper.addEventListener('touchmove', (e) => {
+    this.onTimelineTouchMove = (e) => {
       if (this.isSeeking && e.touches && e.touches.length > 0) {
         if (e.cancelable) e.preventDefault();
         this.showHUD();
         handleTimelineSeek(e.touches[0].clientX, e.touches[0].clientY, false);
       }
-    }, { passive: false });
+    };
+    window.addEventListener('touchmove', this.onTimelineTouchMove, { passive: false });
 
-    this.timelineWrapper.addEventListener('touchend', () => {
+    this.onTimelineTouchEnd = () => {
       finishTimelineSeek();
-    }, { passive: true });
-
-    this.timelineWrapper.addEventListener('touchcancel', () => {
-      finishTimelineSeek();
-    }, { passive: true });
+    };
+    window.addEventListener('touchend', this.onTimelineTouchEnd, { passive: true });
+    window.addEventListener('touchcancel', this.onTimelineTouchEnd, { passive: true });
 
     // Timeline hover tooltip
     this.timelineWrapper.addEventListener('mousemove', (e) => {
@@ -1679,6 +1723,13 @@ class CustomVideoPlayer {
     }
     if (this.onTimelineMouseUp) {
       window.removeEventListener('mouseup', this.onTimelineMouseUp);
+    }
+    if (this.onTimelineTouchMove) {
+      window.removeEventListener('touchmove', this.onTimelineTouchMove);
+    }
+    if (this.onTimelineTouchEnd) {
+      window.removeEventListener('touchend', this.onTimelineTouchEnd);
+      window.removeEventListener('touchcancel', this.onTimelineTouchEnd);
     }
     if (this.onVisualViewportUpdate && window.visualViewport) {
       window.visualViewport.removeEventListener('resize', this.onVisualViewportUpdate);

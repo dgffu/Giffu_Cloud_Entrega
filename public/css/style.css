@@ -2041,26 +2041,26 @@ body.is-dragging-directory .category-header {
 }
 
 .login-gate-info-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
+  width: 24px;
+  height: 24px;
+  background: transparent;
   color: var(--text-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: none;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
   padding: 0;
+  outline: none;
 }
 
 .login-gate-info-btn:hover,
 .login-gate-info-btn.active {
-  background: rgba(255, 255, 255, 0.18);
+  background: transparent;
   color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.35);
-  transform: scale(1.06);
+  border: none;
+  transform: scale(1.1);
 }
 
 .login-gate-info-popover {
@@ -2143,15 +2143,15 @@ body.is-dragging-directory .category-header {
 
 /* Light Theme overrides for popover */
 [data-theme="light"] .login-gate-info-btn {
-  background: #f1f5f9;
+  background: transparent;
   color: #64748b;
-  border-color: #cbd5e1;
+  border: none;
 }
 [data-theme="light"] .login-gate-info-btn:hover,
 [data-theme="light"] .login-gate-info-btn.active {
-  background: #e2e8f0;
+  background: transparent;
   color: #0f172a;
-  border-color: #94a3b8;
+  border: none;
 }
 [data-theme="light"] .login-gate-info-popover {
   background: #ffffff;

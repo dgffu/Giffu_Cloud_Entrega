@@ -1719,25 +1719,6 @@
   z-index: 999999 !important;
 }
 
-/* Mobile Rotated Landscape: Automatically turns wide videos to fill the screen in wide when phone is portrait */
-.custom-player-wrapper.is-fullscreen.fullscreen-rotated-landscape {
-  position: fixed !important;
-  top: 50% !important;
-  left: 50% !important;
-  width: 100vh !important;
-  width: 100dvh !important;
-  height: 100vw !important;
-  height: 100dvw !important;
-  max-width: 100vh !important;
-  max-width: 100dvh !important;
-  max-height: 100vw !important;
-  max-height: 100dvw !important;
-  transform: translate(-50%, -50%) rotate(90deg) !important;
-  transform-origin: center center !important;
-  z-index: 999999 !important;
-  overflow: hidden !important;
-}
-
 body.video-fullscreen-active {
   overflow: hidden !important;
 }

@@ -422,18 +422,14 @@ class CustomVideoPlayer {
 
   updateFullscreenOrientation() {
     if (!this.isFullscreen()) {
-      this.container.classList.remove('fullscreen-rotated-landscape');
       return;
     }
 
-    const isMobile = this.isMobileDevice();
     const isVertical = this.isVerticalVideo();
-    const isDevicePortrait = window.innerHeight > window.innerWidth;
 
     if (isVertical) {
       // COM EXCEÇÃO DOS VÍDEOS VERTICAIS:
       // se mantém verticais na tela cheia, preenchendo a tela em formato retrato.
-      this.container.classList.remove('fullscreen-rotated-landscape');
       if (screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('portrait-primary').catch(() => {
           screen.orientation.lock('portrait').catch(() => {});
@@ -441,12 +437,11 @@ class CustomVideoPlayer {
       }
     } else {
       // VÍDEOS HORIZONTAIS / WIDE:
-      // no mobile, ao entrar em tela cheia com o dispositivo em pé (retrato),
-      // vira automaticamente o vídeo para preencher a tela em wide.
-      if (isMobile && isDevicePortrait) {
-        this.container.classList.add('fullscreen-rotated-landscape');
-      } else {
-        this.container.classList.remove('fullscreen-rotated-landscape');
+      // no mobile, ao entrar em tela cheia, bloqueia/vira em wide automaticamente quando suportado
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape-primary').catch(() => {
+          screen.orientation.lock('landscape').catch(() => {});
+        });
       }
     }
   }
@@ -519,7 +514,7 @@ class CustomVideoPlayer {
       try { this.video.webkitExitFullscreen(); } catch (e) {}
     }
 
-    this.container.classList.remove('is-fullscreen', 'fullscreen-rotated-landscape');
+    this.container.classList.remove('is-fullscreen');
     document.body.classList.remove('video-fullscreen-active');
     this.updateFullscreenIcon(false);
 
@@ -643,7 +638,7 @@ class CustomVideoPlayer {
 
     this.video.addEventListener('webkitendfullscreen', () => {
       document.body.classList.remove('video-fullscreen-active');
-      this.container.classList.remove('is-fullscreen', 'fullscreen-rotated-landscape');
+      this.container.classList.remove('is-fullscreen');
       this.updateFullscreenIcon(false);
       if (screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('portrait').catch(() => {});

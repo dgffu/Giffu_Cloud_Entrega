@@ -10823,6 +10823,11 @@ class EntregaApp {
     const catNameEl = document.getElementById('ctxCategoryName');
     if (catNameEl) catNameEl.textContent = cat.name;
 
+    const btnRename = document.getElementById('ctxCatBtnRename');
+    if (btnRename) {
+      btnRename.style.display = this.isClientMode ? 'none' : 'flex';
+    }
+
     const defaultBtn = document.getElementById('ctxBtnDefaultColor');
     const isDefault = !cat.color || cat.color.toLowerCase() === '#ff5400';
     if (defaultBtn) {
@@ -10909,6 +10914,23 @@ class EntregaApp {
   setupCategoryContextMenu() {
     const menu = document.getElementById('categoryContextMenu');
     if (!menu) return;
+
+    const btnCatRename = document.getElementById('ctxCatBtnRename');
+    btnCatRename?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.activeContextMenuCategory) {
+        const cat = this.activeContextMenuCategory;
+        this.closeCategoryContextMenu();
+        this.openUniversalRenameModal({
+          type: 'category',
+          id: cat.id,
+          name: cat.name,
+          title: cat.name,
+          color: cat.color || null,
+          item: cat
+        });
+      }
+    });
 
     const defaultBtn = document.getElementById('ctxBtnDefaultColor');
     defaultBtn?.addEventListener('click', (e) => {
@@ -11970,14 +11992,24 @@ class EntregaApp {
           await window.API.updateDivision(ctxItem.id, { name: newName });
           ctxItem.item.name = newName;
         } else if (ctxItem.type === 'category') {
-          await window.API.renameCategory(ctxItem.id, newName);
+          const res = await window.API.renameCategory(ctxItem.id, newName);
+          if (res && res.categories) this.data.categories = res.categories;
           ctxItem.item.name = newName;
+          if (this.lobbyCategoryFilter === ctxItem.title) {
+            this.lobbyCategoryFilter = newName;
+          }
+          if (this.sidebarCollapsedCategories && this.sidebarCollapsedCategories.has(ctxItem.title)) {
+            this.sidebarCollapsedCategories.delete(ctxItem.title);
+            this.sidebarCollapsedCategories.add(newName);
+            this.saveCollapsedCategories();
+          }
         }
 
         this.closeUniversalRenameModal();
         window.showToast(`"${newName}" renomeado com sucesso! ✓`);
 
         await this.fetchData();
+        this.populateCategorySelects();
         this.renderSidebar();
         this.renderMainContent();
       } catch (err) {

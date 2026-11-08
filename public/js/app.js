@@ -4567,8 +4567,8 @@ class EntregaApp {
             <div class="lobby-empty-icon">
               <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
             </div>
-            <h3>Nenhum diretório cadastrado</h3>
-            <p>Espelhe uma pasta (diretório) do Google Drive para começar a entregar com mais profissionalismo e elegância!</p>
+            <h3>Nenhum diretório adicionado</h3>
+            <p>Espelhe uma pasta (diretório) do Drive para começar a entregar com mais profissionalismo e elegância!</p>
             <button class="btn-primary" id="btnLobbyEmptyAdd" style="margin-top: 14px;">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
               Adicionar Primeiro Diretório

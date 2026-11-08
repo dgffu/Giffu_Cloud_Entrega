@@ -9725,18 +9725,95 @@ class EntregaApp {
     return result;
   }
 
-  openBatchDownloadModal(proj, allItems) {
+  downloadSingleFile(file) {
+    if (!file || !file.url) {
+      window.showToast('Arquivo indisponível para download', 'error');
+      return;
+    }
+    let downloadUrl = `${file.url}${file.url.includes('?') ? '&' : '?'}download=1`;
+    const proj = this.selectedProject || (this.data && this.data.projects ? this.data.projects.find(p => (p.videos || []).some(v => v.id === file.id)) : null);
+    const pwd = (this.unlockedPasswords && (
+      this.unlockedPasswords[file.id] ||
+      (file.folderId && this.unlockedPasswords[file.folderId]) ||
+      (file.driveFolderId && this.unlockedPasswords[file.driveFolderId]) ||
+      (proj && (this.unlockedPasswords[proj.id] || this.unlockedPasswords[proj.slug]))
+    )) || (proj && typeof proj.password === 'string' ? proj.password : '') || '';
+    if (pwd && !downloadUrl.includes('pwd=')) {
+      downloadUrl += `&pwd=${encodeURIComponent(pwd)}`;
+    }
+
+    const isImg = file.type === 'image';
+    const isArch = file.type === 'archive';
+    const isFl = file.type === 'file';
+    let ext = this.getFileExtension(file) || '';
+    if (ext.startsWith('.')) ext = ext.slice(1);
+    if (!ext) {
+      ext = isImg ? 'jpg' : ((isArch || isFl) ? (file.extension ? file.extension.replace('.', '') : (isArch ? 'zip' : 'file')) : 'mp4');
+    }
+    let fileName = file.fileName || file.title || 'arquivo';
+    if (!fileName.toLowerCase().endsWith('.' + ext.toLowerCase())) {
+      fileName = `${fileName}.${ext}`;
+    }
+
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.showToast(`Iniciando download de "${fileName}"...`);
+  }
+
+  openBatchDownloadModal(proj, allItems, customTarget = null) {
     const modal = document.getElementById('modalBatchDownload');
     if (!modal) return;
 
-    const isScoped = this.isClientMode && this.scopedFolderId;
-    const scopedFolder = isScoped ? (proj.folders || []).find(f => f.id === this.scopedFolderId) : null;
-    const currentFolder = this.currentFolderId ? (proj.folders || []).find(f => f.id === this.currentFolderId) : null;
-    const modalTitleFolder = currentFolder || scopedFolder;
-    const displayProjectName = modalTitleFolder ? modalTitleFolder.name : proj.name;
+    let targetItems = [];
+    let displayProjectName = proj.name;
+    let modalTitleFolder = null;
+    let hasSelection = false;
+    let targetFolderId = null;
 
-    const hasSelection = (this.selectedMediaIds && this.selectedMediaIds.size > 0) || (this.selectedFolderIds && this.selectedFolderIds.size > 0);
-    const targetItems = this.getSelectedItems(proj, allItems);
+    if (customTarget && customTarget.folder) {
+      modalTitleFolder = customTarget.folder;
+      displayProjectName = customTarget.folder.name;
+      targetFolderId = customTarget.folder.id;
+      const folderSet = this.getDescendantFolderIds(proj, customTarget.folder.id);
+      folderSet.add(customTarget.folder.id);
+      targetItems = (proj.videos || []).filter(item => {
+        const fid = item.driveFolderId || item.folderId;
+        return folderSet.has(fid);
+      });
+      if (this.isClientMode && this.scopedFolderId) {
+        const allowedFolderIds = this.getDescendantFolderIds(proj, this.scopedFolderId);
+        allowedFolderIds.add(this.scopedFolderId);
+        targetItems = targetItems.filter(item => {
+          const fid = item.driveFolderId || item.folderId;
+          return allowedFolderIds.has(fid);
+        });
+      }
+    } else if (customTarget && customTarget.project) {
+      displayProjectName = customTarget.project.name;
+      targetItems = customTarget.project.videos || [];
+      if (this.isClientMode && this.scopedFolderId) {
+        const allowedFolderIds = this.getDescendantFolderIds(proj, this.scopedFolderId);
+        allowedFolderIds.add(this.scopedFolderId);
+        targetItems = targetItems.filter(item => {
+          const fid = item.driveFolderId || item.folderId;
+          return allowedFolderIds.has(fid);
+        });
+      }
+    } else {
+      const isScoped = this.isClientMode && this.scopedFolderId;
+      const scopedFolder = isScoped ? (proj.folders || []).find(f => f.id === this.scopedFolderId) : null;
+      const currentFolder = this.currentFolderId ? (proj.folders || []).find(f => f.id === this.currentFolderId) : null;
+      modalTitleFolder = currentFolder || scopedFolder;
+      displayProjectName = modalTitleFolder ? modalTitleFolder.name : proj.name;
+
+      hasSelection = (this.selectedMediaIds && this.selectedMediaIds.size > 0) || (this.selectedFolderIds && this.selectedFolderIds.size > 0);
+      targetItems = this.getSelectedItems(proj, allItems);
+      targetFolderId = this.currentFolderId || (this.isClientMode ? this.scopedFolderId : null);
+    }
 
     if (targetItems.length === 0) {
       window.showToast(`Nenhum arquivo disponível para download ${modalTitleFolder ? 'nesta pasta' : 'neste diretório'}`);
@@ -9781,12 +9858,11 @@ class EntregaApp {
           if (this.selectedFolderIds && this.selectedFolderIds.size > 0) {
             params.push(`folders=${Array.from(this.selectedFolderIds).join(',')}`);
           }
-        } else if (this.gallerySearchQuery && this.gallerySearchQuery.trim()) {
+        } else if (!customTarget && this.gallerySearchQuery && this.gallerySearchQuery.trim()) {
           params.push(`items=${targetItems.map(i => i.id).join(',')}`);
         }
-        const activeFolderParam = this.currentFolderId || (this.isClientMode ? this.scopedFolderId : null);
-        if (activeFolderParam) {
-          params.push(`folder=${encodeURIComponent(activeFolderParam)}`);
+        if (targetFolderId) {
+          params.push(`folder=${encodeURIComponent(targetFolderId)}`);
         }
         const pwd = (this.unlockedPasswords && (this.unlockedPasswords[proj.id] || this.unlockedPasswords[proj.slug]))
           || (typeof proj.password === 'string' ? proj.password : '')
@@ -11313,6 +11389,30 @@ class EntregaApp {
       }
     });
 
+    // Action 2.05: Baixar / Baixar em Lote (Embaixo do Editar)
+    const btnDownload = document.getElementById('ctxBtnDownload');
+    btnDownload?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = this.activeUniversalContextItem;
+      this.closeUniversalContextMenu();
+      if (!item) return;
+
+      if (item.type === 'file') {
+        this.downloadSingleFile(item.item);
+      } else if (item.type === 'folder') {
+        const folder = item.item;
+        const proj = item.project || (this.data && this.data.projects ? this.data.projects.find(p => p.id === item.projectId) : this.selectedProject);
+        if (proj && folder) {
+          this.openBatchDownloadModal(proj, null, { folder });
+        }
+      } else if (item.type === 'project') {
+        const proj = item.item;
+        if (proj) {
+          this.openBatchDownloadModal(proj, null, { project: proj });
+        }
+      }
+    });
+
     // Action 2.1: Copiar Link (Apenas itens compartilháveis)
     const btnCopyLink = document.getElementById('ctxBtnCopyLink');
     btnCopyLink?.addEventListener('click', async (e) => {
@@ -11512,6 +11612,24 @@ class EntregaApp {
       // Ao clicar com o direito em arquivos, não há opção de adicionar
       const showUpload = isAuthor && (ctxItem.type === 'project' || ctxItem.type === 'folder');
       btnAddUpload.style.display = showUpload ? 'flex' : 'none';
+    }
+
+    // Baixar / Baixar em Lote: Embaixo do Editar
+    // - Para arquivos (file): "Baixar" (download direto do arquivo selecionado)
+    // - Para pastas (folder) e diretórios (project): "Baixar em Lote" (abre modal de lote com escopo da pasta/diretório clicado)
+    // - Para divisões e categorias: oculto
+    const btnDownload = document.getElementById('ctxBtnDownload');
+    const txtDownload = document.getElementById('ctxBtnDownloadText');
+    if (btnDownload) {
+      if (ctxItem.type === 'file') {
+        btnDownload.style.display = 'flex';
+        if (txtDownload) txtDownload.textContent = 'Baixar';
+      } else if (ctxItem.type === 'folder' || ctxItem.type === 'project') {
+        btnDownload.style.display = 'flex';
+        if (txtDownload) txtDownload.textContent = 'Baixar em Lote';
+      } else {
+        btnDownload.style.display = 'none';
+      }
     }
 
     // Copiar Link: Visível para itens que podem compartilhar o link (diretório, pasta, arquivo)

@@ -849,6 +849,36 @@
       </div>
     </div>
 
+    <!-- MODAL: Confirmação de Exclusão de Divisão (Identidade Giffú Cloud) -->
+    <div class="modal-backdrop" id="modalConfirmDeleteDivision" style="z-index: 10005;">
+      <div class="modal-card" style="max-width: 440px;">
+        <div class="modal-header">
+          <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px; color: #EF4444;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+            <span>Excluir Divisão</span>
+          </h3>
+          <button class="modal-close-btn" type="button" id="btnCancelDeleteDivisionX" aria-label="Fechar">&times;</button>
+        </div>
+        <div class="modal-body" style="padding-top: 16px;">
+          <p style="margin: 0; font-size: 14px; color: var(--text-primary); line-height: 1.5;">
+            Tem certeza de que deseja excluir a divisão <strong id="deleteDivisionNameTarget" style="color: var(--brand-orange, #FF5400);"></strong>?
+          </p>
+          <p style="margin: 10px 0 0 0; font-size: 13px; color: var(--text-secondary); line-height: 1.45;">
+            Os diretórios contidos nela serão mantidos na categoria.
+          </p>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
+          <button type="button" class="btn-secondary" id="btnCancelDeleteDivision">Cancelar</button>
+          <button type="button" class="btn-danger" id="btnConfirmDeleteDivisionAction">Excluir</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Context Menu para Divisão na Sidebar -->
     <div class="category-context-menu division-context-menu" id="divisionContextMenu" style="display: none;" role="menu" aria-label="Menu da Divisão">
       <div class="context-menu-header">

@@ -3476,23 +3476,22 @@ class EntregaApp {
     setTimeout(() => nameInput?.focus(), 80);
   }
 
-  async confirmDeleteDivision(div) {
+  confirmDeleteDivision(div) {
     if (!div) return;
-    const msg = `Tem certeza de que deseja excluir a divisão "${div.name}"?\nOs diretórios contidos nela serão mantidos na categoria.`;
-    if (!confirm(msg)) return;
+    const modal = document.getElementById('modalConfirmDeleteDivision');
+    if (!modal) return;
 
-    try {
-      const res = await window.API.deleteDivision(div.id);
-      if (res && res.divisions) {
-        this.data.divisions = res.divisions;
-      }
-      await this.fetchData();
-      document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.remove('open'));
-      this.render();
-      window.showToast(`Divisão "${div.name}" excluída com sucesso!`);
-    } catch (err) {
-      window.showToast(err.message || 'Erro ao excluir divisão', 'error');
-    }
+    this.pendingDeleteDivision = div;
+    const nameEl = document.getElementById('deleteDivisionNameTarget');
+    if (nameEl) nameEl.textContent = `"${div.name}"`;
+
+    modal.classList.add('open');
+  }
+
+  closeConfirmDeleteDivisionModal() {
+    const modal = document.getElementById('modalConfirmDeleteDivision');
+    if (modal) modal.classList.remove('open');
+    this.pendingDeleteDivision = null;
   }
 
   openDivisionContextMenu(e, div) {
@@ -11507,7 +11506,11 @@ class EntregaApp {
       const item = this.activeUniversalContextItem;
       this.closeUniversalContextMenu();
       if (item) {
-        this.openDeleteDriveModal(item);
+        if (item.type === 'division') {
+          this.confirmDeleteDivision(item.item);
+        } else {
+          this.openDeleteDriveModal(item);
+        }
       }
     });
 
@@ -12519,6 +12522,47 @@ class EntregaApp {
       }
     });
 
+    // Confirm Delete Division Modal Events (Identidade Giffú Cloud)
+    const modalDeleteDiv = document.getElementById('modalConfirmDeleteDivision');
+    const btnCancelDelDiv = document.getElementById('btnCancelDeleteDivision');
+    const btnCancelDelDivX = document.getElementById('btnCancelDeleteDivisionX');
+    const btnConfirmDelDiv = document.getElementById('btnConfirmDeleteDivisionAction');
+
+    btnCancelDelDiv?.addEventListener('click', () => this.closeConfirmDeleteDivisionModal());
+    btnCancelDelDivX?.addEventListener('click', () => this.closeConfirmDeleteDivisionModal());
+    modalDeleteDiv?.addEventListener('click', (e) => {
+      if (e.target === modalDeleteDiv) this.closeConfirmDeleteDivisionModal();
+    });
+
+    btnConfirmDelDiv?.addEventListener('click', async () => {
+      const div = this.pendingDeleteDivision;
+      if (!div) return;
+
+      if (btnConfirmDelDiv) {
+        btnConfirmDelDiv.disabled = true;
+        btnConfirmDelDiv.textContent = 'Excluindo...';
+      }
+
+      try {
+        const res = await window.API.deleteDivision(div.id);
+        if (res && res.divisions) {
+          this.data.divisions = res.divisions;
+        }
+        await this.fetchData();
+        this.closeConfirmDeleteDivisionModal();
+        document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.remove('open'));
+        this.render();
+        window.showToast(`Divisão "${div.name}" excluída com sucesso! ✓`);
+      } catch (err) {
+        window.showToast(err.message || 'Erro ao excluir divisão', 'error');
+      } finally {
+        if (btnConfirmDelDiv) {
+          btnConfirmDelDiv.disabled = false;
+          btnConfirmDelDiv.textContent = 'Excluir';
+        }
+      }
+    });
+
     // Dismiss division context menu on click outside, scroll, resize or Escape
     document.addEventListener('click', (e) => {
       const divMenu = document.getElementById('divisionContextMenu');
@@ -12534,6 +12578,9 @@ class EntregaApp {
         if (divMenu && divMenu.style.display !== 'none') {
           divMenu.style.display = 'none';
           this.activeContextMenuDivision = null;
+        }
+        if (modalDeleteDiv?.classList.contains('open')) {
+          this.closeConfirmDeleteDivisionModal();
         }
       }
     });

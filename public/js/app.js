@@ -10103,11 +10103,6 @@ class EntregaApp {
             <input type="text" class="category-manage-input" value="${cat.name}" data-id="${cat.id}" data-original="${cat.name}" placeholder="Nome da categoria" title="Clique para editar o nome" />
             <span class="category-manage-badge">${activeCount} diretório${activeCount !== 1 ? 's' : ''}</span>
             <div class="category-manage-actions">
-              <button class="category-action-btn btn-save-cat" data-id="${cat.id}" title="Salvar alteração do nome">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-              </button>
               <button class="category-action-btn btn-delete-cat" data-id="${cat.id}" data-name="${cat.name}" data-count="${activeCount}" title="${canDelete ? 'Excluir categoria' : 'A única categoria do sistema não pode ser excluída'}" ${!canDelete ? 'disabled' : ''}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"></polyline>
@@ -10152,48 +10147,9 @@ class EntregaApp {
       `;
     }).join('');
 
-    const handleRename = async (row) => {
-      const input = row.querySelector('.category-manage-input');
-      const catId = input.getAttribute('data-id');
-      const original = input.getAttribute('data-original');
-      const newName = input.value.trim();
-
-      if (!newName) {
-        window.showToast('O nome da categoria não pode ficar vazio', 'error');
-        input.value = original;
-        return;
-      }
-      if (newName === original) return;
-
-      try {
-        const res = await window.API.renameCategory(catId, newName);
-        if (res && res.categories) this.data.categories = res.categories;
-        input.setAttribute('data-original', newName);
-        if (this.lobbyCategoryFilter === original) {
-          this.lobbyCategoryFilter = newName;
-        }
-        if (this.sidebarCollapsedCategories) {
-          if (this.sidebarCollapsedCategories.has(original)) {
-            this.sidebarCollapsedCategories.delete(original);
-            this.sidebarCollapsedCategories.add(newName);
-            this.saveCollapsedCategories();
-          }
-        }
-        await this.fetchData();
-        this.populateCategorySelects();
-        this.render();
-        this.openManageCategoriesModal();
-        window.showToast(`Categoria renomeada para "${newName}"!`);
-      } catch (err) {
-        window.showToast(err.message || 'Erro ao renomear categoria', 'error');
-        input.value = original;
-      }
-    };
-
     listContainer.querySelectorAll('.category-manage-item').forEach(item => {
       const row = item.querySelector('.category-manage-row');
       const input = item.querySelector('.category-manage-input');
-      const btnSave = item.querySelector('.btn-save-cat');
       const btnDelete = item.querySelector('.btn-delete-cat');
       const catColorBtn = item.querySelector('.category-manage-color-btn');
       const palette = item.querySelector('.category-inline-palette');
@@ -10243,12 +10199,8 @@ class EntregaApp {
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          handleRename(row);
+          this.handleDoneManageCategories();
         }
-      });
-
-      btnSave?.addEventListener('click', () => {
-        handleRename(row);
       });
 
       btnDelete?.addEventListener('click', async () => {
@@ -10288,6 +10240,82 @@ class EntregaApp {
     });
 
     modal.classList.add('open');
+  }
+
+  async handleDoneManageCategories() {
+    const modal = document.getElementById('modalManageCategories');
+    const listContainer = document.getElementById('categoryManageList');
+    if (!modal || !listContainer) return;
+
+    const inputs = Array.from(listContainer.querySelectorAll('.category-manage-input'));
+    const changed = [];
+
+    for (const input of inputs) {
+      const catId = input.getAttribute('data-id');
+      const original = input.getAttribute('data-original');
+      const newName = input.value.trim();
+
+      if (!newName) {
+        window.showToast('O nome da categoria não pode ficar vazio', 'error');
+        input.focus();
+        return;
+      }
+
+      if (newName !== original) {
+        changed.push({ catId, original, newName, input });
+      }
+    }
+
+    const doneBtn = document.getElementById('btnManageCategoriesDone');
+    if (changed.length > 0) {
+      if (doneBtn) {
+        doneBtn.disabled = true;
+        doneBtn.textContent = 'Salvando...';
+      }
+
+      try {
+        for (const item of changed) {
+          const res = await window.API.renameCategory(item.catId, item.newName);
+          if (res && res.categories) this.data.categories = res.categories;
+          item.input.setAttribute('data-original', item.newName);
+          if (this.lobbyCategoryFilter === item.original) {
+            this.lobbyCategoryFilter = item.newName;
+          }
+          if (this.sidebarCollapsedCategories) {
+            if (this.sidebarCollapsedCategories.has(item.original)) {
+              this.sidebarCollapsedCategories.delete(item.original);
+              this.sidebarCollapsedCategories.add(item.newName);
+              this.saveCollapsedCategories();
+            }
+          }
+        }
+
+        await this.fetchData();
+        this.populateCategorySelects();
+        this.render();
+
+        if (changed.length === 1) {
+          window.showToast(`Categoria renomeada para "${changed[0].newName}"! ✓`);
+        } else {
+          window.showToast(`${changed.length} categorias atualizadas com sucesso! ✓`);
+        }
+      } catch (err) {
+        console.error(err);
+        window.showToast(err.message || 'Erro ao renomear categoria', 'error');
+        if (doneBtn) {
+          doneBtn.disabled = false;
+          doneBtn.textContent = 'Concluir';
+        }
+        return;
+      } finally {
+        if (doneBtn) {
+          doneBtn.disabled = false;
+          doneBtn.textContent = 'Concluir';
+        }
+      }
+    }
+
+    modal.classList.remove('open');
   }
 
   async handleFilesUpload(files, targetFolderId, targetFolderName, optionalProj = null) {
@@ -12306,6 +12334,10 @@ class EntregaApp {
       this.resetAddCategoryModal();
       document.getElementById('modalAddCategory')?.classList.add('open');
       setTimeout(() => document.getElementById('newCategoryName')?.focus(), 80);
+    });
+
+    document.getElementById('btnManageCategoriesDone')?.addEventListener('click', () => {
+      this.handleDoneManageCategories();
     });
 
     document.getElementById('btnAddDirectoryAction')?.addEventListener('click', () => {

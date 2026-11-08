@@ -11572,19 +11572,19 @@ class EntregaApp {
 
     if (ctxItem.type === 'category') {
       badgeText = 'CATEGORIA';
-      iconSvg = `<svg width="17" height="17" viewBox="0 0 24 24" fill="${curColor}"><path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/></svg>`;
+      iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="${curColor}"><path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/></svg>`;
     } else if (ctxItem.type === 'division') {
       badgeText = 'DIVISÃO';
-      iconSvg = `<svg width="17" height="17" viewBox="0 0 24 24" fill="${curColor}"><path d="M19 4h-4V2H9v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V8h14v12z"/></svg>`;
+      iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="${curColor}"><path d="M19 4h-4V2H9v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V8h14v12z"/></svg>`;
     } else if (ctxItem.type === 'project') {
       badgeText = 'DIRETÓRIO';
-      iconSvg = `<svg width="17" height="17" viewBox="0 0 24 24" fill="${curColor}"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`;
+      iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="${curColor}"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`;
     } else if (ctxItem.type === 'folder') {
       badgeText = 'PASTA';
-      iconSvg = `<svg width="17" height="17" viewBox="0 0 24 24" fill="${curColor}"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`;
+      iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="${curColor}"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`;
     } else if (ctxItem.type === 'file') {
       badgeText = (ctxItem.itemType ? ctxItem.itemType.toUpperCase() : 'ARQUIVO');
-      iconSvg = `<svg width="17" height="17" viewBox="0 0 24 24" fill="${curColor}"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>`;
+      iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="${curColor}"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>`;
     }
 
     if (badgeEl) badgeEl.textContent = badgeText;

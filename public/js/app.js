@@ -2590,20 +2590,41 @@ class EntregaApp {
     modal.classList.add('open');
   }
 
-  pinCurrentFolder() {
-    const currentG = this.getGalleryData();
-    if (!currentG || !currentG.currentFolder || !currentG.proj) return;
+  pinFolder(folder = null, proj = null) {
+    if (!folder || !proj) {
+      const currentG = this.getGalleryData();
+      if (!currentG || !currentG.currentFolder || !currentG.proj) return;
+      folder = currentG.currentFolder;
+      proj = currentG.proj;
+    }
+    this.pendingPinFolder = { folder, proj };
     const modal = document.getElementById('modalConfirmPinFolder');
+    const titleEl = document.getElementById('modalConfirmPinFolderTitle');
+    if (titleEl) {
+      titleEl.textContent = `Fixar "${folder.name}" como novo diretório?`;
+    }
     if (modal) {
       modal.classList.add('open');
     }
   }
 
+  pinCurrentFolder() {
+    this.pinFolder();
+  }
+
   async executePinCurrentFolder() {
-    const currentG = this.getGalleryData();
-    if (!currentG || !currentG.currentFolder || !currentG.proj) return;
-    const folder = currentG.currentFolder;
-    const proj = currentG.proj;
+    let folder = null;
+    let proj = null;
+    if (this.pendingPinFolder) {
+      folder = this.pendingPinFolder.folder;
+      proj = this.pendingPinFolder.proj;
+      this.pendingPinFolder = null;
+    } else {
+      const currentG = this.getGalleryData();
+      if (!currentG || !currentG.currentFolder || !currentG.proj) return;
+      folder = currentG.currentFolder;
+      proj = currentG.proj;
+    }
 
     let driveLink = '';
     if (proj.cloudProvider && proj.cloudProvider !== 'google') {
@@ -11047,8 +11068,8 @@ class EntregaApp {
       }
     }
 
-    // 2. Pasta Interna (.macos-col-folder, .subfolder-card)
-    const folderEl = target.closest('.macos-col-folder, .subfolder-card[data-folder-id]');
+    // 2. Pasta Interna (.macos-col-folder, .subfolder-card, .gallery-crumb-link)
+    const folderEl = target.closest('.macos-col-folder, .subfolder-card[data-folder-id], .gallery-crumb-link[data-folder-id]');
     if (folderEl) {
       const folderId = folderEl.getAttribute('data-folder-id');
       if (folderId && folderId !== 'root') {
@@ -11410,6 +11431,19 @@ class EntregaApp {
       }
     });
 
+    // Action 2.02: Fixar (Pastas/Subpastas -> Novo Diretório)
+    const btnPin = document.getElementById('ctxBtnPin');
+    btnPin?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = this.activeUniversalContextItem;
+      this.closeUniversalContextMenu();
+      if (item && item.type === 'folder') {
+        const folder = item.item;
+        const proj = item.project || (this.data && this.data.projects ? this.data.projects.find(p => p.id === item.projectId) : this.selectedProject);
+        this.pinFolder(folder, proj);
+      }
+    });
+
     // Action 2.05: Baixar / Baixar em Lote (Embaixo do Editar)
     const btnDownload = document.getElementById('ctxBtnDownload');
     btnDownload?.addEventListener('click', (e) => {
@@ -11641,6 +11675,12 @@ class EntregaApp {
     const btnEdit = document.getElementById('ctxBtnEdit');
     if (btnEdit) {
       btnEdit.style.display = isAuthor ? 'flex' : 'none';
+    }
+
+    // Fixar: Visível APENAS para pastas/subpastas e exclusivo do Autor
+    const btnPin = document.getElementById('ctxBtnPin');
+    if (btnPin) {
+      btnPin.style.display = (isAuthor && ctxItem.type === 'folder') ? 'flex' : 'none';
     }
 
     // Baixar / Baixar em Lote: Embaixo do Editar
@@ -12439,10 +12479,12 @@ class EntregaApp {
     const modalPin = document.getElementById('modalConfirmPinFolder');
     document.getElementById('btnCancelPinFolder')?.addEventListener('click', () => {
       modalPin?.classList.remove('open');
+      this.pendingPinFolder = null;
     });
     modalPin?.addEventListener('click', (e) => {
       if (e.target === modalPin) {
         modalPin.classList.remove('open');
+        this.pendingPinFolder = null;
       }
     });
     document.getElementById('btnConfirmPinFolder')?.addEventListener('click', async () => {

@@ -12766,7 +12766,7 @@ class EntregaApp {
         window.showToast('Novo diretório criado com sucesso!');
         this.render();
       } catch (err) {
-        alert(err.message || 'Erro ao criar diretório');
+        window.showAppAlert(err.message || 'Erro ao criar diretório', 'Aviso do Google Drive');
       } finally {
         if (loaderEl) loaderEl.style.display = 'none';
         if (submitBtn) {
@@ -12851,7 +12851,7 @@ class EntregaApp {
           this.render();
         }
       } catch (err) {
-        alert(err.message || 'Erro ao atualizar diretório');
+        window.showAppAlert(err.message || 'Erro ao atualizar diretório', 'Aviso do Google Drive');
       } finally {
         if (loaderEl) loaderEl.style.display = 'none';
         if (submitBtn) {
@@ -13314,6 +13314,78 @@ window.showToast = function (message) {
   }, 3200);
 };
 
+// Global App Alert Modal (Identidade Visual Giffú Cloud)
+window.showAppAlert = function (message, title = 'Atenção') {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modalAppAlert');
+    if (!modal) {
+      if (typeof window._originalAlert === 'function') {
+        window._originalAlert(message);
+      }
+      return resolve();
+    }
+
+    const titleEl = document.getElementById('appAlertTitle');
+    const msgEl = document.getElementById('appAlertMessage');
+    const btnOk = document.getElementById('btnAppAlertOk');
+    const btnClose = document.getElementById('btnAppAlertClose');
+
+    if (titleEl) titleEl.textContent = title || 'Atenção';
+    if (msgEl) msgEl.textContent = String(message || '');
+
+    let isClosed = false;
+    const closeAlert = () => {
+      if (isClosed) return;
+      isClosed = true;
+      modal.classList.remove('open');
+      btnOk?.removeEventListener('click', onOk);
+      btnClose?.removeEventListener('click', onClose);
+      modal.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKeyDown);
+      resolve();
+    };
+
+    const onOk = (e) => {
+      e?.stopPropagation();
+      closeAlert();
+    };
+    const onClose = (e) => {
+      e?.stopPropagation();
+      closeAlert();
+    };
+    const onBackdrop = (e) => {
+      if (e.target === modal) {
+        e.stopPropagation();
+        closeAlert();
+      }
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        closeAlert();
+      }
+    };
+
+    btnOk?.addEventListener('click', onOk);
+    btnClose?.addEventListener('click', onClose);
+    modal.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKeyDown);
+
+    modal.classList.add('open');
+    setTimeout(() => {
+      btnOk?.focus();
+    }, 40);
+  });
+};
+
+// Preserve original window.alert and redirect all alert calls to showAppAlert
+if (typeof window._originalAlert !== 'function') {
+  window._originalAlert = window.alert;
+}
+window.alert = function (message, title) {
+  window.showAppAlert(message, title);
+};
 
 // Global thumbnail error fallback for mobile/Drive rate-limits
 window.handleMediaThumbError = function (imgEl, driveFileId, fallbackStreamUrl) {

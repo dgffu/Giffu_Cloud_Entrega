@@ -11547,11 +11547,16 @@ class EntregaApp {
     const menu = document.getElementById('appUniversalContextMenu');
     if (!menu) return;
 
-    // Reset color accordion
+    const isAuthor = !this.isClientMode;
+
+    // Reset color accordion (exclusivo para o autor)
     const colorGroup = document.getElementById('ctxColorGroup');
     const paletteWrap = document.getElementById('ctxPaletteWrapper');
     const btnColorToggle = document.getElementById('ctxBtnColorToggle');
-    if (colorGroup) colorGroup.classList.remove('open');
+    if (colorGroup) {
+      colorGroup.classList.remove('open');
+      colorGroup.style.display = isAuthor ? 'block' : 'none';
+    }
     if (paletteWrap) paletteWrap.style.display = 'none';
     if (btnColorToggle) btnColorToggle.setAttribute('aria-expanded', 'false');
 
@@ -11587,37 +11592,37 @@ class EntregaApp {
     if (iconWrap) iconWrap.innerHTML = iconSvg;
     if (colorDot) colorDot.style.backgroundColor = curColor;
 
-    // Ações de Adicionar abaixo de "Cor":
+    // Ações de Adicionar abaixo de "Cor" (exclusivas do Autor):
     const btnAddDirectory = document.getElementById('ctxBtnAddDirectory');
     const btnAddDivision = document.getElementById('ctxBtnAddDivision');
     const btnAddUpload = document.getElementById('ctxBtnAddUpload');
-    const isAuthor = !this.isClientMode;
 
     if (btnAddDirectory) {
-      // Ao clicar com o direito em divisões/subdivisões: + Diretório (abre menu normal de criar/espelhar diretório)
       const showDir = isAuthor && (ctxItem.type === 'division' || ctxItem.type === 'category');
       btnAddDirectory.style.display = showDir ? 'flex' : 'none';
     }
 
     if (btnAddDivision) {
-      // Ao clicar com o direito em divisões/subdivisões: + Divisão (para criar uma subdivisão — abre menu normal de criar divisão)
-      // Em Diretórios (project), não exibe + Divisão
       const showDiv = isAuthor && (ctxItem.type === 'division' || ctxItem.type === 'category');
       btnAddDivision.style.display = showDiv ? 'flex' : 'none';
     }
 
     if (btnAddUpload) {
-      // Ao clicar com o direito em Diretório: + Upload (opção normal de enviar arquivos para o drive como dentro dos diretórios já faz)
-      // Ao clicar com o direito em pastas e subpastas: + Upload (opção normal de enviar arquivos para o drive como dentro dos diretórios já faz)
-      // Ao clicar com o direito em arquivos, não há opção de adicionar
       const showUpload = isAuthor && (ctxItem.type === 'project' || ctxItem.type === 'folder');
       btnAddUpload.style.display = showUpload ? 'flex' : 'none';
+    }
+
+    // Editar (exclusivo do Autor):
+    const btnEdit = document.getElementById('ctxBtnEdit');
+    if (btnEdit) {
+      btnEdit.style.display = isAuthor ? 'flex' : 'none';
     }
 
     // Baixar / Baixar em Lote: Embaixo do Editar
     // - Para arquivos (file): "Baixar" (download direto do arquivo selecionado)
     // - Para pastas (folder) e diretórios (project): "Baixar em Lote" (abre modal de lote com escopo da pasta/diretório clicado)
     // - Para divisões e categorias: oculto
+    // Sempre disponível tanto para autor quanto para cliente
     const btnDownload = document.getElementById('ctxBtnDownload');
     const txtDownload = document.getElementById('ctxBtnDownloadText');
     if (btnDownload) {
@@ -11632,18 +11637,24 @@ class EntregaApp {
       }
     }
 
-    // Copiar Link: Visível para itens que podem compartilhar o link (diretório, pasta, arquivo)
+    // Copiar Link: Visível apenas se liberado pelo autor (getItemShareLink valida se está permitido)
     const btnCopyLink = document.getElementById('ctxBtnCopyLink');
     if (btnCopyLink) {
       const shareInfo = this.getItemShareLink(ctxItem);
       btnCopyLink.style.display = shareInfo ? 'flex' : 'none';
     }
 
-    // Arquivar: Visível APENAS para diretórios (project)
+    // Renomear (exclusivo do Autor):
+    const btnRename = document.getElementById('ctxBtnRename');
+    if (btnRename) {
+      btnRename.style.display = isAuthor ? 'flex' : 'none';
+    }
+
+    // Arquivar: Visível APENAS para diretórios e exclusivo do Autor
     const btnArchive = document.getElementById('ctxBtnArchive');
     const txtArchive = document.getElementById('ctxBtnArchiveText');
     if (btnArchive) {
-      const isProj = (ctxItem.type === 'project');
+      const isProj = isAuthor && (ctxItem.type === 'project');
       btnArchive.style.display = isProj ? 'flex' : 'none';
       if (isProj && txtArchive) {
         const isArchived = Boolean(ctxItem.item && ctxItem.item.archived);
@@ -11651,15 +11662,25 @@ class EntregaApp {
       }
     }
 
-    // Remover do Cloud: Visível APENAS para diretórios (project)
+    // Remover do Cloud: Visível APENAS para diretórios e exclusivo do Autor
     const btnRemoveCloud = document.getElementById('ctxBtnRemoveCloud');
     if (btnRemoveCloud) {
-      btnRemoveCloud.style.display = (ctxItem.type === 'project') ? 'flex' : 'none';
+      btnRemoveCloud.style.display = (isAuthor && ctxItem.type === 'project') ? 'flex' : 'none';
     }
 
-    // Excluir do Drive: label adaptativa
+    // Excluir do Drive (exclusivo do Autor):
+    const dividerDanger = document.getElementById('ctxDividerDanger');
+    if (dividerDanger) {
+      dividerDanger.style.display = isAuthor ? 'block' : 'none';
+    }
+
+    const btnDeleteDrive = document.getElementById('ctxBtnDeleteDrive');
+    if (btnDeleteDrive) {
+      btnDeleteDrive.style.display = isAuthor ? 'flex' : 'none';
+    }
+
     const deleteText = document.getElementById('ctxBtnDeleteText');
-    if (deleteText) {
+    if (deleteText && isAuthor) {
       if (ctxItem.type === 'project' || ctxItem.type === 'folder' || ctxItem.type === 'file') {
         deleteText.textContent = 'Excluir do Drive';
       } else if (ctxItem.type === 'division') {
@@ -11669,22 +11690,35 @@ class EntregaApp {
       }
     }
 
-    // Update Swatches Active Status
-    const defaultBtn = document.getElementById('ctxSwatchDefaultBtn');
-    const defaultHex = this.getDefaultColor().toLowerCase();
-    const isDefaultColor = !ctxItem.color || ctxItem.color.toLowerCase() === defaultHex || ctxItem.color.toLowerCase() === '#ff5400';
-    if (defaultBtn) {
-      defaultBtn.classList.toggle('selected', isDefaultColor);
-      const defaultCheck = document.getElementById('ctxDefaultCheck');
-      if (defaultCheck) defaultCheck.style.opacity = isDefaultColor ? '1' : '0';
+    // No modo cliente, apenas "Baixar" (ou "Baixar em Lote") e "Copiar Link" (se liberado pelo autor) podem existir.
+    // Se nenhum estiver visível, não há nenhuma ação para o cliente — aborta a exibição do menu de contexto.
+    if (!isAuthor) {
+      const hasDownload = Boolean(btnDownload && btnDownload.style.display !== 'none');
+      const hasCopyLink = Boolean(btnCopyLink && btnCopyLink.style.display !== 'none');
+      if (!hasDownload && !hasCopyLink) {
+        this.closeUniversalContextMenu();
+        return;
+      }
     }
 
-    const swatches = menu.querySelectorAll('.ctx-swatch-btn');
-    swatches.forEach(btn => {
-      const hex = btn.getAttribute('data-color');
-      const isSelected = Boolean(!isDefaultColor && ctxItem.color && ctxItem.color.toLowerCase() === hex.toLowerCase());
-      btn.classList.toggle('selected', isSelected);
-    });
+    // Update Swatches Active Status (somente se autor)
+    if (isAuthor) {
+      const defaultBtn = document.getElementById('ctxSwatchDefaultBtn');
+      const defaultHex = this.getDefaultColor().toLowerCase();
+      const isDefaultColor = !ctxItem.color || ctxItem.color.toLowerCase() === defaultHex || ctxItem.color.toLowerCase() === '#ff5400';
+      if (defaultBtn) {
+        defaultBtn.classList.toggle('selected', isDefaultColor);
+        const defaultCheck = document.getElementById('ctxDefaultCheck');
+        if (defaultCheck) defaultCheck.style.opacity = isDefaultColor ? '1' : '0';
+      }
+
+      const swatches = menu.querySelectorAll('.ctx-swatch-btn');
+      swatches.forEach(btn => {
+        const hex = btn.getAttribute('data-color');
+        const isSelected = Boolean(!isDefaultColor && ctxItem.color && ctxItem.color.toLowerCase() === hex.toLowerCase());
+        btn.classList.toggle('selected', isSelected);
+      });
+    }
 
     // Position menu within viewport
     menu.style.display = 'block';

@@ -789,6 +789,10 @@ app.post('/api/projects', requireAuthor, async (req, res) => {
   currentDb.projects.unshift(newProject);
   storage.saveUserDb(req.user.id, currentDb);
 
+  if (newProject.driveLink && Array.isArray(newProject.videos) && newProject.videos.length > 0) {
+    syncQueueManager.enqueueVideosFromProject(newProject, userDb);
+  }
+
   res.status(201).json(newProject);
 });
 
@@ -2682,6 +2686,11 @@ app.post('/api/drive/sync', requireAuthor, async (req, res) => {
     message = 'Pasta vinculada. Faça login com Google como Autor para espelhar pela API do Drive.';
   }
 
+  // Dispara processamento em segundo plano das rendições Frame.io para vídeos novos
+  if (project && Array.isArray(project.videos) && project.videos.length > 0) {
+    syncQueueManager.enqueueVideosFromProject(project, userDb);
+  }
+
   res.json({
     success: true,
     source: result.source,
@@ -3038,6 +3047,430 @@ async function ensureLocalWebCompatibleVideo(filePath) {
     return null;
   }
 }
+
+// ============================================================================
+// FRAME.IO REPRODUÇÃO & PROCESSAMENTO DE RENDIÇÕES NA NUVEM (.cloud_stream)
+// ============================================================================
+const convertingCloudStreamJobs = new Map();
+
+function probeVideoInfo(filePath) {
+  return new Promise((resolve) => {
+    let ffmpegPath = 'ffmpeg';
+    try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
+
+    const proc = spawn(ffmpegPath, ['-i', filePath]);
+    let errStr = '';
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { proc.kill('SIGKILL'); } catch (e) {}
+      resolve({ isAlpha: false, width: 0, height: 0, duration: 0, vCodec: null });
+    }, 8000);
+
+    proc.stderr.on('data', d => errStr += d.toString());
+    proc.on('close', () => {
+      if (timedOut) return;
+      clearTimeout(timer);
+      const isAlpha = /yuva|rgba|argb|bgra|abgr|gbrp\d*a/i.test(errStr) || /alpha/i.test(errStr);
+      const vMatch = errStr.match(/Stream #\d+:\d+.*?: Video: ([a-zA-Z0-9_-]+)/i);
+      const vCodec = vMatch ? vMatch[1].toLowerCase() : null;
+      const dimMatch = errStr.match(/, (\d{2,5})x(\d{2,5})/);
+      const width = dimMatch ? parseInt(dimMatch[1], 10) : 0;
+      const height = dimMatch ? parseInt(dimMatch[2], 10) : 0;
+      const durMatch = errStr.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d+)/);
+      let duration = 0;
+      if (durMatch) {
+        duration = parseInt(durMatch[1], 10) * 3600 + parseInt(durMatch[2], 10) * 60 + parseFloat(durMatch[3]);
+      }
+      resolve({ isAlpha, width, height, duration, vCodec });
+    });
+    proc.on('error', () => {
+      clearTimeout(timer);
+      resolve({ isAlpha: false, width: 0, height: 0, duration: 0, vCodec: null });
+    });
+  });
+}
+
+function transcodeFrameIoRendition(input, output, targetHeight = 1080, isAlpha = false, duration = 0, onProgress = null) {
+  let ffmpegPath = 'ffmpeg';
+  try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
+
+  return new Promise((resolve, reject) => {
+    let args = [];
+    const isDarwin = process.platform === 'darwin';
+    const maxWidth = Math.round(targetHeight * 16 / 9);
+    // Dimensões sempre pares com preservação de vídeos verticais (9:16)
+    const scaleFilter = `"scale='if(gt(ih,iw),-2,trunc(min(${maxWidth},iw)/2)*2)':'if(gt(ih,iw),trunc(min(${targetHeight},ih)/2)*2,-2)'"`;
+
+    if (isAlpha) {
+      args = [
+        '-y',
+        '-i', input,
+        '-map', '0:v:0',
+        '-map', '0:a?',
+        '-vf', scaleFilter,
+        '-c:v', 'libvpx-vp9',
+        '-pix_fmt', 'yuva420p',
+        '-b:v', '0',
+        '-crf', '32',
+        '-c:a', 'libopus',
+        '-b:a', '128k',
+        output
+      ];
+    } else if (isDarwin) {
+      args = [
+        '-y',
+        '-i', input,
+        '-map', '0:v:0',
+        '-map', '0:a?',
+        '-vf', scaleFilter,
+        '-c:v', 'h264_videotoolbox',
+        '-b:v', targetHeight >= 1080 ? '3500k' : (targetHeight >= 720 ? '2000k' : '800k'),
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ac', '2',
+        '-movflags', '+faststart',
+        output
+      ];
+    } else {
+      args = [
+        '-y',
+        '-i', input,
+        '-map', '0:v:0',
+        '-map', '0:a?',
+        '-vf', scaleFilter,
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', targetHeight >= 1080 ? '22' : '24',
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ac', '2',
+        '-movflags', '+faststart',
+        output
+      ];
+    }
+
+    const proc = spawn(ffmpegPath, args, { shell: true });
+    let errStr = '';
+
+    proc.stderr.on('data', d => {
+      const text = d.toString();
+      errStr += text;
+      if (onProgress && duration > 0) {
+        const timeMatch = text.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+        if (timeMatch) {
+          const secs = parseInt(timeMatch[1], 10) * 3600 + parseInt(timeMatch[2], 10) * 60 + parseFloat(timeMatch[3]);
+          const pct = Math.min(99, Math.max(1, Math.round((secs / duration) * 100)));
+          onProgress(pct);
+        }
+      }
+    });
+
+    proc.on('close', code => {
+      if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
+        if (onProgress) onProgress(100);
+        resolve();
+      } else {
+        if (isDarwin && !isAlpha && !errStr.includes('FallbackAttempted')) {
+          try { if (fs.existsSync(output)) fs.unlinkSync(output); } catch (e) {}
+          const fallbackArgs = [
+            '-y',
+            '-i', input,
+            '-map', '0:v:0',
+            '-map', '0:a?',
+            '-vf', scaleFilter,
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',
+            '-crf', '23',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-movflags', '+faststart',
+            output
+          ];
+          const fbProc = spawn(ffmpegPath, fallbackArgs, { shell: true });
+          fbProc.on('close', fbCode => {
+            if (fbCode === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
+              if (onProgress) onProgress(100);
+              resolve();
+            } else {
+              reject(new Error(`Fallback libx264 falhou com código ${fbCode}`));
+            }
+          });
+          fbProc.on('error', reject);
+          return;
+        }
+        reject(new Error(`FFmpeg falhou com código ${code}: ${errStr.slice(-300)}`));
+      }
+    });
+
+    proc.on('error', reject);
+  });
+}
+
+function persistCloudStreamId(userId, projectId, videoId, rendition, cloudFileId) {
+  if (!userId || !cloudFileId) return;
+  try {
+    const currentDb = storage.getUserDb(userId);
+    let targetProject = null;
+    let targetVideo = null;
+
+    if (projectId) {
+      targetProject = (currentDb.projects || []).find(p => p.id === projectId);
+      if (targetProject) {
+        targetVideo = (targetProject.videos || []).find(v => v.id === videoId);
+      }
+    }
+
+    if (!targetVideo && videoId) {
+      for (const p of (currentDb.projects || [])) {
+        const foundV = (p.videos || []).find(v => v.id === videoId);
+        if (foundV) {
+          targetProject = p;
+          targetVideo = foundV;
+          break;
+        }
+      }
+    }
+
+    if (targetVideo) {
+      if (!targetVideo.cloudStream) targetVideo.cloudStream = {};
+      if (!targetVideo.cloudStream.renditions) targetVideo.cloudStream.renditions = {};
+      targetVideo.cloudStream.renditions[rendition] = cloudFileId;
+      targetProject.updatedAt = new Date().toISOString();
+      storage.saveUserDb(userId, currentDb);
+    }
+  } catch (err) {
+    console.warn('[CloudStream] Falha ao persistir cloudStream ID:', err.message);
+  }
+}
+
+async function ensureCloudStreamRendition(fileId, video, userDb, rendition = '1080p', project = null, onProgress = null) {
+  const targetHeight = rendition === '720p' ? 720 : (rendition === '360p' ? 360 : 1080);
+  const isAlpha = Boolean(video?.isAlpha);
+  const ext = isAlpha ? 'webm' : 'mp4';
+  const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
+  const cachePath = path.join(cacheDir, `${fileId}_${rendition}.${ext}`);
+
+  if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+    if (onProgress) onProgress(100);
+    return cachePath;
+  }
+
+  // 1. Verifica se já está registrado no banco de dados
+  if (video?.cloudStream?.renditions?.[rendition]) {
+    if (onProgress) onProgress(100);
+    return { cloudDriveId: video.cloudStream.renditions[rendition] };
+  }
+
+  // 2. Se temos a pasta pai, verifica se o arquivo já existe na pasta .cloud_stream do Drive
+  let cloudStreamFolder = null;
+  const parentFolderId = video?.driveFolderId || project?.driveFolderId;
+  if (parentFolderId) {
+    try {
+      cloudStreamFolder = await driveApi.getOrCreateCloudStreamFolder(userDb, parentFolderId);
+      if (cloudStreamFolder && cloudStreamFolder.id) {
+        const streamFileName = `stream_${rendition}_${fileId}.${ext}`;
+        const existingDriveFile = await driveApi.findStreamFileInDrive(userDb, cloudStreamFolder.id, streamFileName);
+        if (existingDriveFile && existingDriveFile.id) {
+          persistCloudStreamId(userDb.user.id, project?.id, video?.id, rendition, existingDriveFile.id);
+          if (onProgress) onProgress(100);
+          return { cloudDriveId: existingDriveFile.id };
+        }
+      }
+    } catch (err) {
+      console.warn(`[CloudStream] Aviso ao buscar .cloud_stream no Drive:`, err.message);
+    }
+  }
+
+  // 3. Transcodifica localmente
+  const jobKey = `${fileId}_${rendition}`;
+  if (convertingCloudStreamJobs.has(jobKey)) {
+    return convertingCloudStreamJobs.get(jobKey);
+  }
+
+  const job = (async () => {
+    const tempSource = path.join(uploadTempDir, `src_${fileId}_${Date.now()}.raw`);
+    const tempTarget = path.join(uploadTempDir, `out_${fileId}_${rendition}_${Date.now()}.${ext}`);
+
+    try {
+      if (onProgress) onProgress(5);
+      const stream = await driveApi.getFileStream(userDb, fileId);
+      const ws = fs.createWriteStream(tempSource);
+      stream.pipe(ws);
+      await new Promise((resolve, reject) => {
+        ws.on('finish', resolve);
+        ws.on('error', reject);
+        stream.on('error', reject);
+      });
+      if (onProgress) onProgress(20);
+
+      // Sonda informações do vídeo
+      const vInfo = await probeVideoInfo(tempSource);
+
+      await transcodeFrameIoRendition(tempSource, tempTarget, targetHeight, vInfo.isAlpha || isAlpha, vInfo.duration, (pct) => {
+        const mappedPct = Math.round(20 + (pct * 0.65));
+        if (onProgress) onProgress(mappedPct);
+      });
+
+      if (!fs.existsSync(tempTarget) || fs.statSync(tempTarget).size === 0) {
+        throw new Error('Arquivo de transcode não foi gerado ou está vazio');
+      }
+
+      // Salva no cache local do servidor
+      fs.copyFileSync(tempTarget, cachePath);
+      if (onProgress) onProgress(88);
+
+      // 4. Faz upload para a pasta .cloud_stream do Google Drive se o token estiver disponível
+      let uploadedFileId = null;
+      if (cloudStreamFolder && cloudStreamFolder.id) {
+        try {
+          const uploadRes = await driveApi.uploadFileToDrive(
+            userDb,
+            cloudStreamFolder.id,
+            `stream_${rendition}_${fileId}.${ext}`,
+            fs.createReadStream(tempTarget),
+            fs.statSync(tempTarget).size,
+            isAlpha ? 'video/webm' : 'video/mp4'
+          );
+          if (uploadRes && uploadRes.id) {
+            uploadedFileId = uploadRes.id;
+            persistCloudStreamId(userDb.user.id, project?.id, video?.id, rendition, uploadedFileId);
+          }
+        } catch (uploadErr) {
+          console.warn(`[CloudStream] Aviso no upload para o Drive:`, uploadErr.message);
+        }
+      }
+      if (onProgress) onProgress(100);
+
+      return uploadedFileId ? { cloudDriveId: uploadedFileId } : cachePath;
+    } catch (err) {
+      console.error(`[CloudStream] Erro ao gerar rendição ${rendition} de ${fileId}:`, err.message);
+      return null;
+    } finally {
+      try { if (fs.existsSync(tempSource)) fs.unlinkSync(tempSource); } catch (e) {}
+      try { if (fs.existsSync(tempTarget)) fs.unlinkSync(tempTarget); } catch (e) {}
+      convertingCloudStreamJobs.delete(jobKey);
+    }
+  })();
+
+  convertingCloudStreamJobs.set(jobKey, job);
+  return job;
+}
+
+// Gerenciador da Fila de Sincronização em Segundo Plano (Background Cloud Sync)
+class SyncQueueManager {
+  constructor() {
+    this.queue = [];
+    this.activeItem = null;
+    this.isProcessing = false;
+  }
+
+  enqueueVideosFromProject(project, userDb) {
+    if (!project || !Array.isArray(project.videos)) return;
+    const videoExts = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi', 'flv', 'wmv', 'prores', 'mts', 'm2ts', 'ts', '3gp', 'mxf']);
+
+    let addedAny = false;
+    for (const v of project.videos) {
+      if (v.type === 'image' || (v.mimeType && v.mimeType.startsWith('image/'))) continue;
+      if (v.type === 'audio' || (v.mimeType && v.mimeType.startsWith('audio/'))) continue;
+
+      const fName = String(v.fileName || v.title || '').toLowerCase();
+      const ext = fName.split('.').pop() || '';
+      const mime = String(v.mimeType || '').toLowerCase();
+      const isVideo = mime.startsWith('video/') || mime === 'application/x-mpegurl' || videoExts.has(ext);
+      if (!isVideo) continue;
+
+      // Se já tem rendição 1080p registrada no cloudStream, já está processado
+      if (v.cloudStream && v.cloudStream.renditions && v.cloudStream.renditions['1080p']) {
+        continue;
+      }
+
+      const fileId = v.driveFileId || (v.url && (v.url.match(/drive=([a-zA-Z0-9_-]+)/) || [])[1]);
+      if (!fileId) continue;
+
+      const alreadyInQueue = this.queue.some(item => item.fileId === fileId) || (this.activeItem && this.activeItem.fileId === fileId);
+      if (alreadyInQueue) continue;
+
+      this.queue.push({
+        id: `sync-${fileId}-${Date.now()}`,
+        projectId: project.id,
+        videoId: v.id,
+        fileId,
+        title: v.title || v.fileName || 'Vídeo',
+        fileName: v.fileName || `${v.title || 'video'}.mp4`,
+        isAlpha: Boolean(v.isAlpha),
+        percent: 0,
+        userId: userDb.user.id
+      });
+      addedAny = true;
+    }
+
+    if (addedAny) {
+      this.broadcastState();
+      this.processNext();
+    }
+  }
+
+  broadcastState() {
+    broadcastNotificationEvent({
+      type: 'sync_queue_update',
+      activeItem: this.activeItem ? {
+        id: this.activeItem.id,
+        projectId: this.activeItem.projectId,
+        videoId: this.activeItem.videoId,
+        title: this.activeItem.title,
+        percent: this.activeItem.percent || 0
+      } : null,
+      queue: this.queue.map(item => ({
+        id: item.id,
+        projectId: item.projectId,
+        videoId: item.videoId,
+        title: item.title,
+        percent: 0
+      })),
+      totalCount: (this.activeItem ? 1 : 0) + this.queue.length
+    });
+  }
+
+  async processNext() {
+    if (this.isProcessing || this.queue.length === 0) return;
+    this.isProcessing = true;
+    this.activeItem = this.queue.shift();
+    this.activeItem.percent = 0;
+    this.broadcastState();
+
+    try {
+      const item = this.activeItem;
+      const userDb = storage.getUserDb(item.userId);
+      const project = (userDb.projects || []).find(p => p.id === item.projectId);
+      const video = project ? (project.videos || []).find(v => v.id === item.videoId) : null;
+
+      if (video) {
+        await ensureCloudStreamRendition(item.fileId, video, userDb, '1080p', project, (pct) => {
+          if (this.activeItem && this.activeItem.fileId === item.fileId) {
+            this.activeItem.percent = pct;
+            this.broadcastState();
+          }
+        });
+      }
+    } catch (err) {
+      console.warn(`[SyncQueue] Erro ao processar rendição de ${this.activeItem?.title}:`, err.message);
+    } finally {
+      this.activeItem = null;
+      this.isProcessing = false;
+      this.broadcastState();
+      if (this.queue.length > 0) {
+        setImmediate(() => this.processNext());
+      }
+    }
+  }
+}
+
+const syncQueueManager = new SyncQueueManager();
 
 async function ensureDriveWebCompatibleVideo(fileId, video, userDb) {
   const cachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
@@ -3469,34 +3902,58 @@ app.get('/api/stream/alpha-status', async (req, res) => {
   return res.json({ ready: true, converting: false, isAlpha: false });
 });
 
-// Status endpoint para o player saber se o vídeo (ProRes / codecs não-nativos) precisa de transcode ou já está pronto
+// Status endpoint para o player saber se o vídeo (ProRes / codecs não-nativos ou rendições Frame.io) precisa de transcode ou já está pronto
 app.get('/api/stream/video-status', async (req, res) => {
+  const quality = String(req.query.quality || 'original').toLowerCase();
+
   if (req.query.drive) {
     const fileId = String(req.query.drive);
-    const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
-    if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
-      return res.json({ ready: true, converting: false, needsTranscode: true });
-    }
-
     const found = storage.findVideoByDriveId(fileId);
     if (!found) return res.status(404).json({ error: 'Vídeo não encontrado' });
 
-    const fileName = (found.video?.fileName || '').toLowerCase();
-    const mime = (found.video?.mimeType || '').toLowerCase();
-    const isLikelyProres = fileName.endsWith('.mov') || mime.includes('quicktime');
-
-    if (!isLikelyProres) {
-      return res.json({ ready: true, converting: false, needsTranscode: false });
+    // Modo Original sempre pronto (exceto se for ProRes sem cache)
+    if (!quality || quality === 'original') {
+      const fileName = (found.video?.fileName || '').toLowerCase();
+      const mime = (found.video?.mimeType || '').toLowerCase();
+      const isLikelyProres = fileName.endsWith('.mov') || mime.includes('quicktime');
+      if (isLikelyProres) {
+        const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
+        if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
+          return res.json({ ready: true, converting: false, quality: 'original' });
+        }
+        return res.json({ ready: false, converting: true, quality: 'original' });
+      }
+      return res.json({ ready: true, converting: false, quality: 'original' });
     }
 
-    const isConverting = convertingWebJobs.has(fileId);
-    if (!isConverting) {
-      ensureDriveWebCompatibleVideo(fileId, found.video, found.userDb).catch(err => {
-        console.error('Erro na conversão web em segundo plano:', err.message);
-      });
+    // Rendição específica (ex: 1080p, 720p, 360p)
+    const isAlpha = Boolean(found.video?.isAlpha);
+    const ext = isAlpha ? 'webm' : 'mp4';
+    const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
+    const cachePath = path.join(cacheDir, `${fileId}_${quality}.${ext}`);
+
+    if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+      return res.json({ ready: true, percent: 100, converting: false, quality });
+    }
+    if (found.video?.cloudStream?.renditions?.[quality]) {
+      return res.json({ ready: true, percent: 100, converting: false, quality });
     }
 
-    return res.json({ ready: false, converting: true, needsTranscode: true });
+    // Verifica se está ativo na fila de sincronização
+    if (syncQueueManager.activeItem && syncQueueManager.activeItem.fileId === fileId) {
+      return res.json({ ready: false, percent: syncQueueManager.activeItem.percent || 0, converting: true, quality });
+    }
+    const isQueued = syncQueueManager.queue.some(item => item.fileId === fileId);
+    if (isQueued) {
+      return res.json({ ready: false, percent: 0, queued: true, converting: false, quality });
+    }
+
+    // Se não estiver na fila, inicia sob demanda em background
+    ensureCloudStreamRendition(fileId, found.video, found.userDb, quality, found.project).catch(err => {
+      console.warn(`[CloudStream] Aviso ao gerar rendição sob demanda ${quality}:`, err.message);
+    });
+
+    return res.json({ ready: false, percent: 10, converting: true, quality });
   }
 
   if (req.query.path) {
@@ -3534,6 +3991,28 @@ app.get('/api/stream/video-status', async (req, res) => {
   }
 
   return res.json({ ready: true, converting: false, needsTranscode: false });
+});
+
+// Endpoint para consultar o status da fila de sincronização em segundo plano
+app.get('/api/sync/queue', requireAuthor, (req, res) => {
+  res.json({
+    ok: true,
+    activeItem: syncQueueManager.activeItem ? {
+      id: syncQueueManager.activeItem.id,
+      projectId: syncQueueManager.activeItem.projectId,
+      videoId: syncQueueManager.activeItem.videoId,
+      title: syncQueueManager.activeItem.title,
+      percent: syncQueueManager.activeItem.percent || 0
+    } : null,
+    queue: syncQueueManager.queue.map(item => ({
+      id: item.id,
+      projectId: item.projectId,
+      videoId: item.videoId,
+      title: item.title,
+      percent: 0
+    })),
+    totalCount: (syncQueueManager.activeItem ? 1 : 0) + syncQueueManager.queue.length
+  });
 });
 
 // Pré-visualização renderizada de alta resolução para .psd, .ai, .pdf e imagens
@@ -3735,8 +4214,75 @@ app.get('/api/stream', async (req, res) => {
     }
     const isDownload = req.query.download === '1';
 
-    // Se o vídeo é alpha e NÃO é download, serve a versão WebM transparente nativa
-    if (video && video.isAlpha && !isDownload) {
+    if (isDownload) {
+      let defaultExt = '.mp4';
+      if (video) {
+        if (video.type === 'audio' || (video.mimeType && video.mimeType.startsWith('audio/'))) {
+          defaultExt = video.extension ? `.${video.extension.toLowerCase().replace('.', '')}` : '.mp3';
+        } else if (video.mimeType === 'video/quicktime' || (video.fileName && video.fileName.toLowerCase().endsWith('.mov'))) {
+          defaultExt = '.mov';
+        }
+      }
+      const streamFileName = (video && video.fileName) || `${(video && video.title) || 'arquivo'}${defaultExt}`;
+
+      return driveApi.streamFile(req, res, userDb, fileId, {
+        download: true,
+        fileName: streamFileName,
+        mimeType: video ? video.mimeType : null
+      }).catch((err) => {
+        console.error('Erro no download do drive:', err.message);
+        if (!res.headersSent) res.status(500).end();
+        else res.destroy();
+      });
+    }
+
+    const quality = String(req.query.quality || 'original').toLowerCase();
+
+    // Se qualidade específica foi solicitada (1080p, 720p, 360p)
+    if (quality !== 'original') {
+      const isAlpha = Boolean(video?.isAlpha);
+      const ext = isAlpha ? 'webm' : 'mp4';
+      const contentType = isAlpha ? 'video/webm' : 'video/mp4';
+      const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
+      const cachePath = path.join(cacheDir, `${fileId}_${quality}.${ext}`);
+
+      // 1. Servir do cache local se disponível
+      if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+        return streamLocalRangeFile(req, res, cachePath, contentType);
+      }
+
+      // 2. Servir do Drive .cloud_stream se disponível
+      const cloudFileId = video?.cloudStream?.renditions?.[quality];
+      if (cloudFileId) {
+        return driveApi.streamFile(req, res, userDb, cloudFileId, {
+          download: false,
+          fileName: `stream_${quality}.${ext}`,
+          mimeType: contentType
+        }).catch(err => {
+          console.warn('[Stream] Falha no stream do Drive .cloud_stream, tentando original:', err.message);
+        });
+      }
+
+      // 3. Tenta obter ou gerar rendição
+      try {
+        const readyPath = await ensureCloudStreamRendition(fileId, video, userDb, quality, project);
+        if (readyPath && typeof readyPath === 'string' && fs.existsSync(readyPath) && fs.statSync(readyPath).size > 0) {
+          return streamLocalRangeFile(req, res, readyPath, contentType);
+        } else if (readyPath && readyPath.cloudDriveId) {
+          return driveApi.streamFile(req, res, userDb, readyPath.cloudDriveId, {
+            download: false,
+            fileName: `stream_${quality}.${ext}`,
+            mimeType: contentType
+          });
+        }
+      } catch (err) {
+        console.error(`Falha ao gerar rendição ${quality}:`, err.message);
+      }
+    }
+
+    // REPRODUÇÃO ORIGINAL (Padrão)
+    // Se o vídeo é alpha e NÃO é download, serve a versão WebM transparente nativa para suporte a alpha no navegador
+    if (video && video.isAlpha) {
       const cachePath = path.join(ALPHA_CACHE_DIR, `${fileId}.webm`);
       if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
         return streamLocalRangeFile(req, res, cachePath, 'video/webm');
@@ -3753,26 +4299,24 @@ app.get('/api/stream', async (req, res) => {
       }
     }
 
-    // Se NÃO é download, verifica se há versão transcodificada compatível (ProRes / DNxHD)
-    if (!isDownload) {
+    // Se é ProRes que o browser nativamente não decodifica, serve versão web compatível
+    const fileName = (video?.fileName || '').toLowerCase();
+    const mime = (video?.mimeType || '').toLowerCase();
+    const isLikelyProres = fileName.endsWith('.mov') || mime.includes('quicktime');
+
+    if (isLikelyProres) {
       const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
       if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
         return streamLocalRangeFile(req, res, webCachePath, 'video/mp4');
       }
 
-      const fileName = (video?.fileName || '').toLowerCase();
-      const mime = (video?.mimeType || '').toLowerCase();
-      const isLikelyProres = fileName.endsWith('.mov') || mime.includes('quicktime');
-
-      if (isLikelyProres) {
-        try {
-          const readyWebPath = await ensureDriveWebCompatibleVideo(fileId, video, userDb);
-          if (readyWebPath && fs.existsSync(readyWebPath) && fs.statSync(readyWebPath).size > 0) {
-            return streamLocalRangeFile(req, res, readyWebPath, 'video/mp4');
-          }
-        } catch (err) {
-          console.error('Falha ao converter ProRes drive:', err.message);
+      try {
+        const readyWebPath = await ensureDriveWebCompatibleVideo(fileId, video, userDb);
+        if (readyWebPath && fs.existsSync(readyWebPath) && fs.statSync(readyWebPath).size > 0) {
+          return streamLocalRangeFile(req, res, readyWebPath, 'video/mp4');
         }
+      } catch (err) {
+        console.error('Falha ao converter ProRes drive:', err.message);
       }
     }
 
@@ -3787,7 +4331,7 @@ app.get('/api/stream', async (req, res) => {
     const streamFileName = (video && video.fileName) || `${(video && video.title) || 'arquivo'}${defaultExt}`;
 
     return driveApi.streamFile(req, res, userDb, fileId, {
-      download: isDownload,
+      download: false,
       fileName: streamFileName,
       mimeType: video ? video.mimeType : null
     }).catch((err) => {

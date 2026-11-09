@@ -654,6 +654,206 @@
   fill: currentColor;
 }
 
+/* ========================================================
+   Frame.io Settings Gear & Quality Popover
+   ======================================================== */
+.player-settings-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.player-settings-btn {
+  position: relative;
+}
+
+/* Badge sobre o ícone de engrenagem (HD, 4K, SD) estilo Frame.io */
+.player-gear-badge {
+  position: absolute;
+  top: 1px;
+  right: -3px;
+  background: #3b82f6;
+  color: #ffffff;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 3.5px;
+  border-radius: 4px;
+  line-height: 1;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  letter-spacing: 0.02em;
+}
+
+/* Popover flutuante Frame.io */
+.player-settings-popover {
+  position: absolute;
+  bottom: calc(100% + 14px);
+  right: -8px;
+  background: rgba(22, 25, 33, 0.96);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  z-index: 60;
+  min-width: 215px;
+  padding: 6px;
+  user-select: none;
+  animation: frameIoMenuIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes frameIoMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  gap: 12px;
+}
+
+.settings-menu-item:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.settings-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-item-icon {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.settings-item-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.settings-item-value {
+  color: #cbd5e1;
+  font-weight: 500;
+}
+
+.settings-chevron {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  opacity: 0.7;
+}
+
+.settings-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 6px;
+}
+
+/* Header do Submenu com botão de Voltar */
+.settings-submenu-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px 9px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 4px;
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: color 0.15s ease;
+}
+
+.settings-submenu-header:hover {
+  color: #ffffff;
+}
+
+.settings-back-icon {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+/* Lista de Opções de Qualidade Frame.io */
+.settings-quality-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-quality-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #e2e8f0;
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.settings-quality-item:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.settings-quality-item.is-selected {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.quality-label-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quality-tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.quality-check-icon {
+  width: 16px;
+  height: 16px;
+  fill: #3b82f6; /* Checkmark azul característico do Frame.io */
+  flex-shrink: 0;
+}
+
 /* Volume Slider & Hover Reveal */
 .volume-group {
   display: flex;

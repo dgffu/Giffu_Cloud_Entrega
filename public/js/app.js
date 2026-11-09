@@ -208,6 +208,12 @@ class NotificationsManager {
         if (!event || !event.data) return;
         try {
           const payload = JSON.parse(event.data);
+          if (payload && payload.type === 'sync_queue_update') {
+            if (this.app && this.app.syncQueueManager) {
+              this.app.syncQueueManager.handleUpdate(payload);
+            }
+            return;
+          }
           if (payload && payload.type && payload.type !== 'connected') {
             this.fetchNotifications({ triggerToast: true });
             if (payload.videoId && this.app && this.app.commentsController && this.app.selectedVideo && this.app.selectedVideo.id === payload.videoId) {
@@ -988,6 +994,274 @@ class NotificationsManager {
   }
 }
 
+// ============================================================================
+// Gerenciador de Interface da Fila de Sincronização em Segundo Plano (Frame.io Cloud Sync)
+// ============================================================================
+class SyncQueueManagerUI {
+  constructor(app) {
+    this.app = app;
+    this.activeItem = null;
+    this.queue = [];
+    this.totalCount = 0;
+    this.isOpen = false;
+    this.currentMount = null;
+    this.pollInterval = null;
+
+    this.init();
+  }
+
+  init() {
+    const mountEl = document.getElementById('syncQueueMount');
+    if (mountEl) {
+      this.mount(mountEl);
+    }
+
+    this.fetchQueue();
+
+    this.pollInterval = setInterval(() => {
+      this.fetchQueue();
+    }, 6000);
+
+    document.addEventListener('click', (e) => {
+      if (this.isOpen) {
+        const wrapper = document.getElementById('syncQueueWrapper');
+        if (wrapper && !wrapper.contains(e.target)) {
+          this.closePopover();
+        }
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isOpen) {
+        this.closePopover();
+      }
+    });
+  }
+
+  async fetchQueue() {
+    try {
+      if (!window.API || !window.API.getSyncQueue) return;
+      const data = await window.API.getSyncQueue();
+      if (data && data.ok) {
+        this.handleUpdate(data);
+      }
+    } catch (e) {}
+  }
+
+  handleUpdate(payload) {
+    if (!payload) return;
+    const prevActiveId = this.activeItem ? this.activeItem.id : null;
+    const prevCount = this.totalCount;
+
+    this.activeItem = payload.activeItem || null;
+    this.queue = payload.queue || [];
+    this.totalCount = (this.activeItem ? 1 : 0) + this.queue.length;
+
+    this.updateBadge();
+
+    if (this.isOpen) {
+      const currentActiveId = this.activeItem ? this.activeItem.id : null;
+      if (currentActiveId && currentActiveId === prevActiveId && prevCount === this.totalCount) {
+        const pctEl = document.getElementById('syncActivePercentText');
+        const barEl = document.getElementById('syncActiveProgressBar');
+        if (pctEl && barEl) {
+          const pct = Math.min(100, Math.max(0, this.activeItem.percent || 0));
+          pctEl.textContent = `${pct}%`;
+          barEl.style.width = `${pct}%`;
+          return;
+        }
+      }
+      this.renderPopoverList();
+    }
+  }
+
+  updateBadge() {
+    let btn = document.getElementById('btnSyncQueue');
+    let badge = document.getElementById('syncQueueBadge');
+    const count = this.totalCount;
+
+    if (!btn) {
+      const mountEl = document.getElementById('syncQueueMount');
+      if (mountEl) {
+        this.mount(mountEl);
+        btn = document.getElementById('btnSyncQueue');
+        badge = document.getElementById('syncQueueBadge');
+      }
+    }
+
+    if (btn) {
+      if (count > 0) {
+        btn.classList.add('is-syncing');
+      } else {
+        btn.classList.remove('is-syncing');
+      }
+    }
+
+    if (badge) {
+      if (count > 0) {
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.style.display = 'flex';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+  }
+
+  togglePopover() {
+    if (this.isOpen) {
+      this.closePopover();
+    } else {
+      this.openPopover();
+    }
+  }
+
+  openPopover() {
+    this.isOpen = true;
+    const popover = document.getElementById('syncPopover');
+    if (popover) {
+      popover.style.display = 'block';
+      this.renderPopoverList();
+    }
+    this.fetchQueue();
+  }
+
+  closePopover() {
+    this.isOpen = false;
+    const popover = document.getElementById('syncPopover');
+    if (popover) {
+      popover.style.display = 'none';
+    }
+  }
+
+  mount(targetEl) {
+    if (!targetEl) return;
+    this.currentMount = targetEl;
+
+    targetEl.innerHTML = `
+      <div class="sync-queue-wrapper" id="syncQueueWrapper">
+        <button type="button" class="btn-sync-queue" id="btnSyncQueue" title="Sincronização na Nuvem">
+          <svg class="sync-icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+          </svg>
+          <span class="sync-badge" id="syncQueueBadge" style="display: none;">0</span>
+        </button>
+
+        <div class="sync-popover" id="syncPopover" style="display: none;">
+          <div class="sync-popover-header">
+            <div class="sync-popover-title">
+              <svg class="sync-popover-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01-.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+              </svg>
+              <span>Processamento de Vídeos</span>
+            </div>
+            <span class="sync-popover-count" id="syncPopoverCount"></span>
+          </div>
+          <div class="sync-popover-list" id="syncPopoverList"></div>
+        </div>
+      </div>
+    `;
+
+    const btn = targetEl.querySelector('#btnSyncQueue');
+    if (btn) {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.togglePopover();
+      });
+    }
+
+    this.updateBadge();
+  }
+
+  renderPopoverList() {
+    const listEl = document.getElementById('syncPopoverList');
+    const countEl = document.getElementById('syncPopoverCount');
+    if (!listEl) return;
+
+    const brandColor = (this.app?.selectedProject?.color) || 'var(--brand-orange, #ff5400)';
+
+    if (this.totalCount === 0) {
+      if (countEl) countEl.textContent = 'Concluído';
+      listEl.innerHTML = `
+        <div class="sync-empty-state">
+          <svg class="sync-empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+          </svg>
+          <span class="sync-empty-title">Todos os vídeos otimizados</span>
+          <span class="sync-empty-desc">As rendições web estão salvas e prontas para reprodução no player.</span>
+        </div>
+      `;
+      return;
+    }
+
+    if (countEl) {
+      countEl.textContent = `${this.totalCount} arquivo${this.totalCount > 1 ? 's' : ''}`;
+    }
+
+    let html = '';
+
+    if (this.activeItem) {
+      const pct = Math.min(100, Math.max(0, this.activeItem.percent || 0));
+      html += `
+        <div class="sync-item is-active" data-project-id="${this.app.escapeHtml(this.activeItem.projectId)}" data-video-id="${this.app.escapeHtml(this.activeItem.videoId)}" title="Clique para abrir e reproduzir no player">
+          <div class="sync-item-top">
+            <div class="sync-item-title-group">
+              <svg class="sync-item-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <span class="sync-item-name" title="${this.app.escapeHtml(this.activeItem.title)}">${this.app.escapeHtml(this.activeItem.title)}</span>
+            </div>
+            <span class="sync-item-percent" id="syncActivePercentText">${pct}%</span>
+          </div>
+          <div class="sync-progress-track">
+            <div class="sync-progress-fill" id="syncActiveProgressBar" style="width: ${pct}%; background-color: ${brandColor};"></div>
+          </div>
+          <div class="sync-item-meta">
+            <span class="sync-item-status">Processando rendição...</span>
+            <span class="sync-item-open-hint">Clique para reproduzir</span>
+          </div>
+        </div>
+      `;
+    }
+
+    for (const item of this.queue) {
+      html += `
+        <div class="sync-item is-queued" data-project-id="${this.app.escapeHtml(item.projectId)}" data-video-id="${this.app.escapeHtml(item.videoId)}" title="Clique para abrir e reproduzir">
+          <div class="sync-item-top">
+            <div class="sync-item-title-group">
+              <svg class="sync-item-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <span class="sync-item-name" title="${this.app.escapeHtml(item.title)}">${this.app.escapeHtml(item.title)}</span>
+            </div>
+            <span class="sync-item-percent">0%</span>
+          </div>
+          <div class="sync-progress-track">
+            <div class="sync-progress-fill" style="width: 0%; background-color: ${brandColor};"></div>
+          </div>
+          <div class="sync-item-meta">
+            <span class="sync-item-status">Na fila</span>
+            <span class="sync-item-open-hint">Clique para reproduzir</span>
+          </div>
+        </div>
+      `;
+    }
+
+    listEl.innerHTML = html;
+
+    listEl.querySelectorAll('.sync-item').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const projId = el.getAttribute('data-project-id');
+        const vidId = el.getAttribute('data-video-id');
+        if (projId && vidId && this.app) {
+          this.app.openVideoFromSync(projId, vidId);
+        }
+      });
+    });
+  }
+}
+
 class EntregaApp {
   constructor() {
     this.data = null;
@@ -997,6 +1271,7 @@ class EntregaApp {
     this.playerInstance = null;
     this.commentsController = null;
     this.notificationsManager = null;
+    this.syncQueueManager = null;
     this.isClientMode = false;
     this.currentFolderId = null;
     this.scopedFolderId = null; // Quando o cliente abre link específico de pasta (impede ver pastas anteriores)
@@ -1711,6 +1986,45 @@ class EntregaApp {
     if (bellMount) {
       this.notificationsManager.mountBell(bellMount);
     }
+  }
+
+  initSyncQueueManager() {
+    if (!this.syncQueueManager) {
+      this.syncQueueManager = new SyncQueueManagerUI(this);
+    }
+    const syncMount = document.getElementById('syncQueueMount');
+    if (syncMount) {
+      this.syncQueueManager.mount(syncMount);
+    }
+  }
+
+  async openVideoFromSync(projectId, videoId) {
+    let proj = (this.data?.projects || []).find(p => p.id === projectId);
+    let vid = proj ? (proj.videos || []).find(v => v.id === videoId) : null;
+    if (!proj || !vid) {
+      await this.fetchData();
+      proj = (this.data?.projects || []).find(p => p.id === projectId);
+      vid = proj ? (proj.videos || []).find(v => v.id === videoId) : null;
+    }
+    if (!proj || !vid) return;
+
+    this.selectedProject = proj;
+    this.selectedVideo = vid;
+    this.currentFolderId = vid.driveFolderId || null;
+    this.scopedFolderId = null;
+    this.isIsolatedFile = false;
+    this.currentView = 'client_player';
+
+    const targetUrl = this.isClientMode
+      ? `/${vid.shortCode || vid.id}`
+      : `/author?project=${proj.id}&video=${vid.id}`;
+    window.history.pushState({}, '', targetUrl);
+
+    if (this.syncQueueManager) {
+      this.syncQueueManager.closePopover();
+    }
+
+    this.render();
   }
 
   setupMobileOrientationGuard() {
@@ -2915,6 +3229,7 @@ class EntregaApp {
       headerRight.innerHTML = `
         <div class="author-header-group">
           <span class="header-mode-tag">Versão Autor</span>
+          <div class="sync-queue-mount" id="syncQueueMount"></div>
           <div class="notifications-bell-mount" id="notificationsBellMount"></div>
         </div>
       `;
@@ -2926,6 +3241,15 @@ class EntregaApp {
         this.initNotificationsManager();
       } else {
         this.notificationsManager.mountBell(bellMount);
+      }
+    }
+
+    const syncMount = document.getElementById('syncQueueMount');
+    if (syncMount) {
+      if (!this.syncQueueManager) {
+        this.initSyncQueueManager();
+      } else {
+        this.syncQueueManager.mount(syncMount);
       }
     }
 

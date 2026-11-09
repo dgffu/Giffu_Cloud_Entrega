@@ -208,12 +208,6 @@ class NotificationsManager {
         if (!event || !event.data) return;
         try {
           const payload = JSON.parse(event.data);
-          if (payload && payload.type === 'sync_queue_update') {
-            if (this.app && this.app.syncQueueManager) {
-              this.app.syncQueueManager.handleUpdate(payload);
-            }
-            return;
-          }
           if (payload && payload.type && payload.type !== 'connected') {
             this.fetchNotifications({ triggerToast: true });
             if (payload.videoId && this.app && this.app.commentsController && this.app.selectedVideo && this.app.selectedVideo.id === payload.videoId) {
@@ -994,283 +988,6 @@ class NotificationsManager {
   }
 }
 
-// ============================================================================
-// Gerenciador de Interface da Fila de Sincronização em Segundo Plano
-// ============================================================================
-class SyncQueueManagerUI {
-  constructor(app) {
-    this.app = app;
-    this.activeItem = null;
-    this.queue = [];
-    this.totalCount = 0;
-    this.isOpen = false;
-    this.currentMount = null;
-    this.pollInterval = null;
-
-    this.init();
-  }
-
-  init() {
-    const mountEl = document.getElementById('syncQueueMount');
-    if (mountEl) {
-      this.mount(mountEl);
-    }
-
-    this.fetchQueue();
-
-    // Polling de segurança a cada 6 segundos caso SSE caia
-    this.pollInterval = setInterval(() => {
-      this.fetchQueue();
-    }, 6000);
-
-    // Fechar dropdown ao clicar fora
-    document.addEventListener('click', (e) => {
-      if (this.isOpen) {
-        const wrapper = document.getElementById('syncQueueWrapper');
-        if (wrapper && !wrapper.contains(e.target)) {
-          this.closePopover();
-        }
-      }
-    });
-
-    // Fechar dropdown ao teclar Escape
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.isOpen) {
-        this.closePopover();
-      }
-    });
-  }
-
-  async fetchQueue() {
-    try {
-      if (!window.API || !window.API.getSyncQueue) return;
-      const data = await window.API.getSyncQueue();
-      if (data && data.ok) {
-        this.handleUpdate(data);
-      }
-    } catch (e) {}
-  }
-
-  handleUpdate(payload) {
-    if (!payload) return;
-    const prevActiveId = this.activeItem ? this.activeItem.id : null;
-    const prevCount = this.totalCount;
-
-    this.activeItem = payload.activeItem || null;
-    this.queue = payload.queue || [];
-    this.totalCount = (this.activeItem ? 1 : 0) + this.queue.length;
-
-    this.updateBadge();
-
-    if (this.isOpen) {
-      const currentActiveId = this.activeItem ? this.activeItem.id : null;
-      // Atualização suave em tempo real de porcentagem se o mesmo item continuar ativo
-      if (currentActiveId && currentActiveId === prevActiveId && prevCount === this.totalCount) {
-        const pctEl = document.getElementById('syncActivePercentText');
-        const barEl = document.getElementById('syncActiveProgressBar');
-        if (pctEl && barEl) {
-          const pct = Math.min(100, Math.max(0, this.activeItem.percent || 0));
-          pctEl.textContent = `${pct}%`;
-          barEl.style.width = `${pct}%`;
-          return;
-        }
-      }
-      this.renderPopoverList();
-    }
-  }
-
-  updateBadge() {
-    let btn = document.getElementById('btnSyncQueue');
-    let badge = document.getElementById('syncQueueBadge');
-    const count = this.totalCount;
-
-    if (!btn) {
-      const mountEl = document.getElementById('syncQueueMount');
-      if (mountEl) {
-        this.mount(mountEl);
-        btn = document.getElementById('btnSyncQueue');
-        badge = document.getElementById('syncQueueBadge');
-      }
-    }
-
-    if (btn) {
-      if (count > 0) {
-        btn.classList.add('is-syncing');
-      } else {
-        btn.classList.remove('is-syncing');
-      }
-    }
-
-    if (badge) {
-      if (count > 0) {
-        badge.textContent = count > 99 ? '99+' : count;
-        badge.style.display = 'flex';
-      } else {
-        badge.style.display = 'none';
-      }
-    }
-  }
-
-  togglePopover() {
-    if (this.isOpen) {
-      this.closePopover();
-    } else {
-      this.openPopover();
-    }
-  }
-
-  openPopover() {
-    this.isOpen = true;
-    const popover = document.getElementById('syncPopover');
-    if (popover) {
-      popover.style.display = 'block';
-      this.renderPopoverList();
-    }
-    this.fetchQueue();
-  }
-
-  closePopover() {
-    this.isOpen = false;
-    const popover = document.getElementById('syncPopover');
-    if (popover) {
-      popover.style.display = 'none';
-    }
-  }
-
-  mount(container) {
-    if (!container) return;
-    this.currentMount = container;
-
-    const count = this.totalCount;
-    container.innerHTML = `
-      <div class="sync-queue-wrapper" id="syncQueueWrapper">
-        <button class="btn-sync-queue ${count > 0 ? 'is-syncing' : ''}" id="btnSyncQueue" aria-label="Sincronização" title="Sincronização">
-          <svg class="sync-icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
-          </svg>
-          <span class="sync-badge" id="syncQueueBadge" style="${count > 0 ? 'display: flex;' : 'display: none;'}">${count > 99 ? '99+' : count}</span>
-        </button>
-        <div class="sync-popover" id="syncPopover" style="${this.isOpen ? 'display: block;' : 'display: none;'}">
-          <div class="sync-popover-header">
-            <div class="sync-popover-title">
-              <svg class="sync-popover-icon ${count > 0 ? 'is-syncing' : ''}" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
-              </svg>
-              <span>Sincronização</span>
-            </div>
-            <span class="sync-popover-count" id="syncPopoverCount">
-              ${count > 0 ? `${count} arquivo${count > 1 ? 's' : ''}` : 'Sincronizado'}
-            </span>
-          </div>
-          <div class="sync-popover-list" id="syncPopoverList"></div>
-        </div>
-      </div>
-    `;
-
-    const btn = container.querySelector('#btnSyncQueue');
-    if (btn) {
-      btn.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.togglePopover();
-      };
-    }
-
-    if (this.isOpen) {
-      this.renderPopoverList();
-    }
-  }
-
-  renderPopoverList() {
-    const listEl = document.getElementById('syncPopoverList');
-    if (!listEl) return;
-
-    const countEl = document.getElementById('syncPopoverCount');
-    if (countEl) {
-      countEl.textContent = this.totalCount > 0 ? `${this.totalCount} arquivo${this.totalCount > 1 ? 's' : ''}` : 'Sincronizado';
-    }
-
-    if (this.totalCount === 0) {
-      listEl.innerHTML = `
-        <div class="sync-empty-state">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sync-empty-icon">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-          </svg>
-          <div class="sync-empty-title">Tudo sincronizado</div>
-          <div class="sync-empty-desc">Nenhum proxy em processamento no momento.</div>
-        </div>
-      `;
-      return;
-    }
-
-    let html = '';
-    const brandColor = (this.app && this.app.getDefaultColor && this.app.getDefaultColor()) || 'var(--brand-orange, #ff5400)';
-
-    if (this.activeItem) {
-      const item = this.activeItem;
-      const pct = Math.min(100, Math.max(0, item.percent || 0));
-      html += `
-        <div class="sync-item is-active" data-project-id="${this.app.escapeHtml(item.projectId)}" data-video-id="${this.app.escapeHtml(item.videoId)}" title="Clique para abrir e reproduzir">
-          <div class="sync-item-top">
-            <div class="sync-item-title-group">
-              <svg class="sync-item-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-              </svg>
-              <span class="sync-item-name" title="${this.app.escapeHtml(item.title)}">${this.app.escapeHtml(item.title)}</span>
-            </div>
-            <span class="sync-item-percent" id="syncActivePercentText">${pct}%</span>
-          </div>
-          <div class="sync-progress-track">
-            <div class="sync-progress-fill" id="syncActiveProgressBar" style="width: ${pct}%; background-color: ${brandColor};"></div>
-          </div>
-          <div class="sync-item-meta">
-            <span class="sync-item-status">Processando proxy...</span>
-            <span class="sync-item-open-hint">Clique para reproduzir</span>
-          </div>
-        </div>
-      `;
-    }
-
-    for (const item of this.queue) {
-      html += `
-        <div class="sync-item is-queued" data-project-id="${this.app.escapeHtml(item.projectId)}" data-video-id="${this.app.escapeHtml(item.videoId)}" title="Clique para abrir e reproduzir">
-          <div class="sync-item-top">
-            <div class="sync-item-title-group">
-              <svg class="sync-item-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-              </svg>
-              <span class="sync-item-name" title="${this.app.escapeHtml(item.title)}">${this.app.escapeHtml(item.title)}</span>
-            </div>
-            <span class="sync-item-percent">0%</span>
-          </div>
-          <div class="sync-progress-track">
-            <div class="sync-progress-fill" style="width: 0%; background-color: ${brandColor};"></div>
-          </div>
-          <div class="sync-item-meta">
-            <span class="sync-item-status">Na fila</span>
-            <span class="sync-item-open-hint">Clique para reproduzir</span>
-          </div>
-        </div>
-      `;
-    }
-
-    listEl.innerHTML = html;
-
-    listEl.querySelectorAll('.sync-item').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const projId = el.getAttribute('data-project-id');
-        const vidId = el.getAttribute('data-video-id');
-        if (projId && vidId && this.app) {
-          this.app.openVideoFromSync(projId, vidId);
-        }
-      });
-    });
-  }
-}
-
 class EntregaApp {
   constructor() {
     this.data = null;
@@ -1280,7 +997,6 @@ class EntregaApp {
     this.playerInstance = null;
     this.commentsController = null;
     this.notificationsManager = null;
-    this.syncQueueManager = null;
     this.isClientMode = false;
     this.currentFolderId = null;
     this.scopedFolderId = null; // Quando o cliente abre link específico de pasta (impede ver pastas anteriores)
@@ -1995,45 +1711,6 @@ class EntregaApp {
     if (bellMount) {
       this.notificationsManager.mountBell(bellMount);
     }
-  }
-
-  initSyncQueueManager() {
-    if (!this.syncQueueManager) {
-      this.syncQueueManager = new SyncQueueManagerUI(this);
-    }
-    const syncMount = document.getElementById('syncQueueMount');
-    if (syncMount) {
-      this.syncQueueManager.mount(syncMount);
-    }
-  }
-
-  async openVideoFromSync(projectId, videoId) {
-    let proj = (this.data?.projects || []).find(p => p.id === projectId);
-    let vid = proj ? (proj.videos || []).find(v => v.id === videoId) : null;
-    if (!proj || !vid) {
-      await this.fetchData();
-      proj = (this.data?.projects || []).find(p => p.id === projectId);
-      vid = proj ? (proj.videos || []).find(v => v.id === videoId) : null;
-    }
-    if (!proj || !vid) return;
-
-    this.selectedProject = proj;
-    this.selectedVideo = vid;
-    this.currentFolderId = vid.driveFolderId || null;
-    this.scopedFolderId = null;
-    this.isIsolatedFile = false;
-    this.currentView = 'client_player';
-
-    const targetUrl = this.isClientMode
-      ? `/${vid.shortCode || vid.id}`
-      : `/author?project=${proj.id}&video=${vid.id}`;
-    window.history.pushState({}, '', targetUrl);
-
-    if (this.syncQueueManager) {
-      this.syncQueueManager.closePopover();
-    }
-
-    this.render();
   }
 
   setupMobileOrientationGuard() {
@@ -3238,7 +2915,6 @@ class EntregaApp {
       headerRight.innerHTML = `
         <div class="author-header-group">
           <span class="header-mode-tag">Versão Autor</span>
-          <div class="sync-queue-mount" id="syncQueueMount"></div>
           <div class="notifications-bell-mount" id="notificationsBellMount"></div>
         </div>
       `;
@@ -3250,15 +2926,6 @@ class EntregaApp {
         this.initNotificationsManager();
       } else {
         this.notificationsManager.mountBell(bellMount);
-      }
-    }
-
-    const syncMount = document.getElementById('syncQueueMount');
-    if (syncMount) {
-      if (!this.syncQueueManager) {
-        this.initSyncQueueManager();
-      } else {
-        this.syncQueueManager.mount(syncMount);
       }
     }
 

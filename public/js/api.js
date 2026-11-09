@@ -420,18 +420,6 @@ const API = {
     return await res.json();
   },
 
-  async getSyncQueue() {
-    const res = await fetch('/api/sync/queue');
-    if (!res.ok) throw new Error('Erro ao obter fila de sincronização');
-    return await res.json();
-  },
-
-  async scanAllSyncProxies() {
-    const res = await fetch('/api/sync/scan-all', { method: 'POST' });
-    if (!res.ok) throw new Error('Erro ao iniciar varredura de sincronização');
-    return await res.json();
-  },
-
   async saveSettings(settings) {
     const res = await fetch('/api/settings', {
       method: 'POST',

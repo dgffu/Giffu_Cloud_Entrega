@@ -173,7 +173,7 @@ class CustomVideoPlayer {
       <!-- In-Player Buffer Suggestion Modal -->
       <div class="player-buffer-suggestion-overlay" id="playerBufferSuggestion" style="display: none;">
         <div class="player-buffer-suggestion-card">
-          <p class="player-buffer-suggestion-text">A reprodução pode estar sendo afetada devido a conexão internet-servidor. Deseja reproduzir uma versão e qualidade reduzida?</p>
+          <p class="player-buffer-suggestion-text">A reprodução pode estar sendo afetada devido a conexão internet-servidor. Deseja reproduzir uma versão em qualidade reduzida?</p>
           <div class="player-buffer-suggestion-actions">
             <button type="button" class="btn-buffer-no" id="btnBufferSuggestNo">Não</button>
             <button type="button" class="btn-buffer-yes" id="btnBufferSuggestYes">Sim</button>

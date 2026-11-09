@@ -535,16 +535,16 @@ body {
 .category-header.active {
   background: var(--brand-orange-subtle);
   border-color: rgba(255, 84, 0, 0.35);
-  color: var(--brand-orange);
+  color: var(--cat-color, var(--brand-orange));
 }
 
 .category-header.active .category-icon:not([style*="color"]) {
-  color: var(--brand-orange);
+  color: var(--cat-color, var(--brand-orange));
 }
 
 .category-header.active .category-count {
   background: rgba(255, 84, 0, 0.2);
-  color: var(--brand-orange);
+  color: var(--cat-color, var(--brand-orange));
 }
 
 .category-header-left {
@@ -556,11 +556,12 @@ body {
 .category-icon {
   display: inline-flex;
   align-items: center;
-  color: var(--brand-orange);
+  color: var(--cat-color, var(--brand-orange));
 }
 
 .category-title {
   letter-spacing: -0.2px;
+  color: inherit;
 }
 
 .category-arrow {

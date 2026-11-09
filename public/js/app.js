@@ -3643,7 +3643,7 @@ class EntregaApp {
       const isCatActive = !this.selectedProject && this.lobbyCategoryFilter === cat.name;
 
       const isCategoryCollapsed = this.isSidebarCategoryCollapsed(cat.name, categories);
-      const catColor = cat.color || '#FF5400';
+      const catColor = cat.color || this.getDefaultColor() || '#FF5400';
 
       const catDivs = this.getDivisionsForCategory(cat.name);
       const topDivs = catDivs.filter(d => !d.parentId || !catDivs.some(p => p.id === d.parentId));
@@ -3735,11 +3735,11 @@ class EntregaApp {
 
       return `
         <div class="category-group ${isCategoryCollapsed ? 'collapsed' : ''}" data-category="${cat.name}">
-          <div class="category-header ${isCatActive ? 'active' : ''}" data-category="${cat.name}" title="${cat.name} (Clique direito para alterar a cor)">
+          <div class="category-header ${isCatActive ? 'active' : ''}" data-category="${cat.name}" style="${catColor ? `--cat-color: ${catColor};` : ''}" title="${cat.name} (Clique direito para alterar a cor)">
             <div class="category-header-left">
               <span class="category-arrow">▼</span>
-              <span class="category-icon" style="color: ${catColor};">${cat.svg}</span>
-              <span class="category-title" style="color: ${catColor};">${cat.name}</span>
+              <span class="category-icon" style="color: ${catColor} !important;">${cat.svg}</span>
+              <span class="category-title" style="color: ${catColor} !important;">${cat.name}</span>
             </div>
           </div>
 
@@ -4478,8 +4478,8 @@ class EntregaApp {
                                 data-cat-filter="${cat.name}" 
                                 data-category="${cat.name}"
                                 title="Filtrar por ${cat.name} (Clique direito para alterar a cor)">
-                          <span class="category-icon" style="${cat.color ? `color: ${cat.color};` : ''}">${cat.svg}</span>
-                          <span>${cat.name}</span>
+                          <span class="category-icon" style="${cat.color ? `color: ${cat.color} !important;` : ''}">${cat.svg}</span>
+                          <span style="${cat.color ? `color: ${cat.color} !important;` : ''}">${cat.name}</span>
                         </button>
                       `;
                     }).join('')}
@@ -6729,7 +6729,7 @@ class EntregaApp {
                title="Categoria: ${this.escapeHtml(cat.name)}">
             <div class="macos-col-item-left">
               ${cat.svg || `<svg class="macos-col-icon folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="${cat.color ? `color: ${cat.color}; fill: ${cat.color};` : ''}"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`}
-              <span class="macos-col-name">${this.escapeHtml(cat.name)}</span>
+              <span class="macos-col-name" style="${cat.color ? `color: ${cat.color} !important;` : ''}">${this.escapeHtml(cat.name)}</span>
             </div>
             <div class="macos-col-item-right">
               ${unresolvedInCat > 0 ? `<span class="col-unresolved-badge" title="${unresolvedInCat} comentário${unresolvedInCat > 1 ? 's' : ''} a resolver">${unresolvedInCat}</span>` : ''}
@@ -10948,6 +10948,8 @@ class EntregaApp {
         const res = await window.API.setCategoryColor(cat.id, finalHex);
         if (res && res.categories) {
           this.data.categories = res.categories;
+          this.renderSidebar();
+          this.renderMainContent();
         }
         this.populateCategorySelects();
         const colorObj = CATEGORY_COLORS.find(c => c.hex.toLowerCase() === (colorHex || '#FF5400').toLowerCase());
@@ -11893,7 +11895,12 @@ class EntregaApp {
     (async () => {
       try {
         if (ctxItem.type === 'category') {
-          await window.API.setCategoryColor(ctxItem.id, finalHex);
+          const res = await window.API.setCategoryColor(ctxItem.id, finalHex);
+          if (res && res.categories) {
+            this.data.categories = res.categories;
+            this.renderSidebar();
+            this.renderMainContent();
+          }
         } else if (ctxItem.type === 'division') {
           await window.API.updateDivision(ctxItem.id, { color: finalHex });
         } else if (ctxItem.type === 'project') {
@@ -12766,7 +12773,7 @@ class EntregaApp {
         window.showToast('Novo diretório criado com sucesso!');
         this.render();
       } catch (err) {
-        window.showAppAlert(err.message || 'Erro ao criar diretório', 'Aviso do Google Drive');
+        window.showAppAlert(err.message || 'Erro ao criar diretório', 'Aviso');
       } finally {
         if (loaderEl) loaderEl.style.display = 'none';
         if (submitBtn) {
@@ -12851,7 +12858,7 @@ class EntregaApp {
           this.render();
         }
       } catch (err) {
-        window.showAppAlert(err.message || 'Erro ao atualizar diretório', 'Aviso do Google Drive');
+        window.showAppAlert(err.message || 'Erro ao atualizar diretório', 'Aviso');
       } finally {
         if (loaderEl) loaderEl.style.display = 'none';
         if (submitBtn) {
@@ -13315,7 +13322,7 @@ window.showToast = function (message) {
 };
 
 // Global App Alert Modal (Identidade Visual Giffú Cloud)
-window.showAppAlert = function (message, title = 'Atenção') {
+window.showAppAlert = function (message, title = 'Aviso') {
   return new Promise((resolve) => {
     const modal = document.getElementById('modalAppAlert');
     if (!modal) {
@@ -13330,7 +13337,7 @@ window.showAppAlert = function (message, title = 'Atenção') {
     const btnOk = document.getElementById('btnAppAlertOk');
     const btnClose = document.getElementById('btnAppAlertClose');
 
-    if (titleEl) titleEl.textContent = title || 'Atenção';
+    if (titleEl) titleEl.textContent = title || 'Aviso';
     if (msgEl) msgEl.textContent = String(message || '');
 
     let isClosed = false;

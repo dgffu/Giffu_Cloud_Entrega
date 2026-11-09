@@ -1,6 +1,23 @@
 // Custom High-Performance Multi-function Video Player
 // Always prioritizes maximum source quality without degradation
 
+// Global Google Cast SDK receiver initialization
+if (typeof window !== 'undefined') {
+  window['__onGCastApiAvailable'] = function(isAvailable) {
+    if (isAvailable && window.cast && window.cast.framework) {
+      try {
+        window.cast.framework.CastContext.getInstance().setOptions({
+          receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+          autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+        });
+        console.log('[Cast] Google Cast SDK inicializado com sucesso.');
+      } catch (err) {
+        console.warn('[Cast] Erro ao inicializar CastContext:', err);
+      }
+    }
+  };
+}
+
 class CustomVideoPlayer {
   constructor(containerElement, videoData, options = {}) {
     this.container = containerElement;
@@ -157,7 +174,7 @@ class CustomVideoPlayer {
 
     this.container.innerHTML = `
       <!-- Video Element -->
-      <video class="custom-video-element" playsinline webkit-playsinline x5-playsinline preload="auto" src="${streamUrl}"></video>
+      <video class="custom-video-element" playsinline webkit-playsinline x5-playsinline x-webkit-airplay="allow" preload="auto" src="${streamUrl}"></video>
 
       <!-- Transcode / Preparing State Overlay -->
       <div class="alpha-transcode-overlay" id="alphaTranscodeOverlay" style="display: none;">
@@ -233,6 +250,11 @@ class CustomVideoPlayer {
               <svg viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"/></svg>
             </button>
 
+            <!-- Transmitir Vídeo (Smart TV / Chromecast) -->
+            <button class="player-btn" id="btnCast" title="Transmitir vídeo para Smart TV ou Chromecast" aria-label="Transmitir Vídeo">
+              <svg viewBox="0 0 24 24" id="castIcon"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+            </button>
+
             <!-- Definir frame como capa (Picture) -->
             ${(this.options.canSetCover !== false) ? `
               <button class="player-btn" id="btnSetFrameAsCover" title="Definir frame como capa" aria-label="Definir frame como capa">
@@ -286,6 +308,7 @@ class CustomVideoPlayer {
     this.btnSpeed = this.container.querySelector('#btnSpeed');
     this.qualityBadgeText = this.container.querySelector('#playerQualityLabel');
     this.btnPiP = this.container.querySelector('#btnPiP');
+    this.btnCast = this.container.querySelector('#btnCast');
     this.btnSetFrameAsCover = this.container.querySelector('#btnSetFrameAsCover');
     this.btnResetFrameCover = this.container.querySelector('#btnResetFrameCover');
     this.btnPlayerToggleComments = this.container.querySelector('#btnPlayerToggleComments');
@@ -1578,6 +1601,169 @@ class CustomVideoPlayer {
     };
 
     window.addEventListener('keydown', this.keyHandler);
+
+    // Setup direct video stream casting to Smart TVs, Chromecasts, AirPlay
+    this.setupCastSupport();
+  }
+
+  setupCastSupport() {
+    if (!this.btnCast) return;
+
+    // Check availability of W3C Remote Playback API
+    if (this.video && this.video.remote) {
+      try {
+        this.video.disableRemotePlayback = false;
+
+        if (typeof this.video.remote.watchAvailability === 'function') {
+          this.video.remote.watchAvailability((available) => {
+            if (this.btnCast) {
+              this.btnCast.style.display = available ? 'inline-flex' : 'none';
+            }
+          }).catch(() => {
+            if (this.btnCast) this.btnCast.style.display = 'inline-flex';
+          });
+        }
+
+        this.video.remote.addEventListener('connecting', () => {
+          this.btnCast.classList.add('is-connecting');
+          this.btnCast.classList.remove('is-connected');
+          this.btnCast.title = 'Conectando à Smart TV / Chromecast...';
+        });
+
+        this.video.remote.addEventListener('connect', () => {
+          this.btnCast.classList.remove('is-connecting');
+          this.btnCast.classList.add('is-connected');
+          this.btnCast.title = 'Conectado à Smart TV (Transmitindo vídeo)';
+        });
+
+        this.video.remote.addEventListener('disconnect', () => {
+          this.btnCast.classList.remove('is-connecting');
+          this.btnCast.classList.remove('is-connected');
+          this.btnCast.title = 'Transmitir vídeo para Smart TV ou Chromecast';
+        });
+      } catch (err) {
+        console.warn('[Cast] Remote Playback setup warning:', err);
+      }
+    }
+
+    // Google Cast SDK session state listener
+    if (window.cast && window.cast.framework) {
+      try {
+        const castContext = window.cast.framework.CastContext.getInstance();
+        castContext.addEventListener(
+          cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
+          (event) => {
+            switch (event.sessionState) {
+              case cast.framework.SessionState.SESSION_STARTING:
+                this.btnCast.classList.add('is-connecting');
+                this.btnCast.classList.remove('is-connected');
+                break;
+              case cast.framework.SessionState.SESSION_STARTED:
+              case cast.framework.SessionState.SESSION_RESUMED:
+                this.btnCast.classList.remove('is-connecting');
+                this.btnCast.classList.add('is-connected');
+                this.btnCast.title = 'Transmitindo via Chromecast / Google TV';
+                break;
+              case cast.framework.SessionState.SESSION_ENDED:
+                this.btnCast.classList.remove('is-connecting');
+                this.btnCast.classList.remove('is-connected');
+                this.btnCast.title = 'Transmitir vídeo para Smart TV ou Chromecast';
+                break;
+            }
+          }
+        );
+      } catch (e) {}
+    }
+
+    // Apple AirPlay state listener (Safari / macOS / iOS)
+    if (this.video && typeof this.video.webkitShowPlaybackTargetPicker === 'function') {
+      this.video.addEventListener('webkitplaybacktargetavailabilitychanged', (e) => {
+        if (this.btnCast) {
+          this.btnCast.style.display = (e.availability === 'available') ? 'inline-flex' : (this.btnCast.style.display || 'inline-flex');
+        }
+      });
+      this.video.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
+        const isWireless = this.video.webkitCurrentPlaybackTargetIsWireless;
+        if (isWireless) {
+          this.btnCast.classList.add('is-connected');
+          this.btnCast.title = 'Transmitindo via AirPlay para TV';
+        } else {
+          this.btnCast.classList.remove('is-connected');
+          this.btnCast.title = 'Transmitir vídeo para Smart TV ou Chromecast';
+        }
+      });
+    }
+
+    // Click handler for Cast Button
+    this.btnCast.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      this.showHUD();
+      await this.triggerCast();
+    });
+  }
+
+  async triggerCast() {
+    const rawSrc = this.video.currentSrc || this.video.src || this.videoData.url;
+    // Resolve absolute URL so remote smart TVs / chromecasts can fetch directly across LAN/WAN
+    const absoluteUrl = new URL(rawSrc, window.location.href).href;
+
+    // 1. Google Cast SDK (Chromecast, Google TV, Android TV)
+    if (window.cast && window.cast.framework) {
+      try {
+        const castContext = window.cast.framework.CastContext.getInstance();
+        const castState = castContext.getCastState();
+        if (castState !== cast.framework.CastState.NO_DEVICES_AVAILABLE) {
+          await castContext.requestSession();
+          const session = castContext.getCurrentSession();
+          if (session) {
+            const mime = this.isMov ? 'video/quicktime' : 'video/mp4';
+            const mediaInfo = new chrome.cast.media.MediaInfo(absoluteUrl, mime);
+            mediaInfo.streamType = chrome.cast.media.StreamType.BUFFERED;
+            mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
+            mediaInfo.metadata.title = this.videoData.title || this.videoData.fileName || 'Vídeo';
+
+            const req = new chrome.cast.media.LoadRequest(mediaInfo);
+            req.autoplay = !this.video.paused;
+            req.currentTime = this.video.currentTime || 0;
+            await session.loadMedia(req);
+            return;
+          }
+        }
+      } catch (err) {
+        if (err !== 'cancel' && err?.code !== 'cancel') {
+          console.warn('[Cast] Cast SDK session request fallback:', err);
+        } else {
+          return; // User cancelled dialog
+        }
+      }
+    }
+
+    // 2. W3C Remote Playback API (Chrome, Edge, Samsung Internet -> Smart TVs & Cast devices)
+    if (this.video && this.video.remote && typeof this.video.remote.prompt === 'function') {
+      try {
+        await this.video.remote.prompt();
+        return;
+      } catch (err) {
+        if (err.name !== 'NotFoundError' && err.name !== 'NotAllowedError') {
+          console.warn('[Cast] Remote Playback API prompt error:', err);
+        } else {
+          return; // User cancelled
+        }
+      }
+    }
+
+    // 3. Apple AirPlay (Safari macOS / iOS -> Apple TV & AirPlay 2 Smart TVs)
+    if (this.video && typeof this.video.webkitShowPlaybackTargetPicker === 'function') {
+      try {
+        this.video.webkitShowPlaybackTargetPicker();
+        return;
+      } catch (err) {
+        console.warn('[Cast] WebKit AirPlay picker error:', err);
+      }
+    }
+
+    // 4. Fallback alert if no API supported or no device detected
+    alert('Nenhum dispositivo compatível encontrado ou seu navegador não suporta streaming direto para Smart TV / Chromecast.');
   }
 
   captureCurrentFrame() {

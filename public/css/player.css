@@ -2317,6 +2317,34 @@ body.photo-fullscreen-active .floating-theme-toggle {
   pointer-events: none;
 }
 
+/* Cast Button & Active States (Smart TVs & Chromecast) */
+.player-btn#btnCast {
+  position: relative;
+  transition: all var(--transition-fast);
+}
+
+.player-btn#btnCast.is-connected {
+  color: #3b82f6 !important;
+  background: rgba(59, 130, 246, 0.2) !important;
+  border-radius: var(--radius-sm);
+}
+
+.player-btn#btnCast.is-connecting {
+  animation: castPulse 1.2s infinite ease-in-out;
+  color: #60a5fa !important;
+}
+
+@keyframes castPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.08);
+  }
+}
+
 
 
 

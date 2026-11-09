@@ -390,10 +390,8 @@ class CustomVideoPlayer {
     return 'FHD';
   }
 
-  buildStreamUrl(quality) {
-    const base = this.videoData.url || '';
-    const sep = base.includes('?') ? '&' : '?';
-    let url = (quality && quality !== 'original') ? `${base}${sep}quality=${quality}` : base;
+  buildStreamUrl() {
+    let url = this.videoData.url || '';
     if (this.isAlpha) {
       url += `${url.includes('?') ? '&' : '?'}alpha=1`;
     }
@@ -417,23 +415,18 @@ class CustomVideoPlayer {
     const maxDim = (w && h) ? Math.max(w, h) : (this.videoData.resolution === '4K' ? 3840 : (this.videoData.resolution === 'FHD' ? 1920 : 1280));
 
     let originalLabel = '1080p';
-    let proxyLabel = '1080p';
 
     if (minDim >= 1440 || maxDim >= 2500 || this.videoData.resolution === '4K' || this.videoData.resolution === 'ULTRA') {
       originalLabel = '4K';
-      proxyLabel = '1080p';
     } else if (minDim > 720 || maxDim > 1280 || this.videoData.resolution === 'FHD') {
       originalLabel = '1080p';
-      proxyLabel = '1080p';
     } else if (minDim > 540 || maxDim > 960 || this.videoData.resolution === 'HD') {
       originalLabel = '720p';
-      proxyLabel = '720p';
     } else if (minDim > 0) {
       originalLabel = `${minDim}p`;
-      proxyLabel = `${minDim}p`;
     }
 
-    return { originalLabel, proxyLabel };
+    return { originalLabel };
   }
 
   getResolutionInfo() {
@@ -448,17 +441,14 @@ class CustomVideoPlayer {
   }
 
   updateSettingsUI() {
-    const { originalLabel, proxyLabel } = this.getQualityLabels();
+    const { originalLabel } = this.getQualityLabels();
     const gearBadge = this.container.querySelector('#playerGearBadge');
     const qualityText = this.container.querySelector('#settingsCurrentQualityText');
 
-    let badgeText = originalLabel === '4K' ? '4K' : (['1080p', '720p'].includes(originalLabel) ? 'HD' : '');
-    let currentText = `Original (${originalLabel})`;
+    const badgeText = originalLabel === '4K' ? '4K' : (['1080p', '720p'].includes(originalLabel) ? 'HD' : '');
+    const currentText = `Original (${originalLabel})`;
 
-    if (this.currentQuality === 'proxy') {
-      badgeText = ['1080p', '720p'].includes(proxyLabel) ? 'HD' : 'SD';
-      currentText = `Proxy (${proxyLabel})`;
-    }
+    this.currentQuality = 'original';
 
     if (gearBadge) {
       gearBadge.textContent = badgeText || 'HD';
@@ -474,35 +464,27 @@ class CustomVideoPlayer {
     const listEl = this.container.querySelector('#settingsQualityOptionsList');
     if (!listEl) return;
 
-    const { originalLabel, proxyLabel } = this.getQualityLabels();
+    const { originalLabel } = this.getQualityLabels();
 
     const options = [
       {
         id: 'original',
         name: `Original (${originalLabel})`,
         tag: originalLabel === '4K' ? '4K' : (['1080p', '720p'].includes(originalLabel) ? 'HD' : '')
-      },
-      {
-        id: 'proxy',
-        name: `Proxy (${proxyLabel})`,
-        tag: ['1080p', '720p'].includes(proxyLabel) ? 'HD' : 'SD'
       }
     ];
 
     let html = '';
     for (const opt of options) {
-      const isSelected = this.currentQuality === opt.id;
       html += `
-        <div class="settings-quality-item ${isSelected ? 'is-selected' : ''}" data-quality="${opt.id}">
+        <div class="settings-quality-item is-selected" data-quality="${opt.id}">
           <div class="quality-label-wrap">
             <span class="quality-name">${opt.name}</span>
             ${opt.tag ? `<span class="quality-tag">${opt.tag}</span>` : ''}
           </div>
-          ${isSelected ? `
-            <svg class="quality-check-icon" viewBox="0 0 24 24">
-              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-            </svg>
-          ` : ''}
+          <svg class="quality-check-icon" viewBox="0 0 24 24">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+          </svg>
         </div>
       `;
     }
@@ -512,66 +494,13 @@ class CustomVideoPlayer {
     listEl.querySelectorAll('.settings-quality-item').forEach(itemEl => {
       itemEl.addEventListener('click', (e) => {
         e.stopPropagation();
-        const q = itemEl.getAttribute('data-quality');
-        if (q) {
-          this.switchQuality(q);
-        }
+        this.closeSettingsPopover();
       });
     });
   }
 
-  async switchQuality(newQuality) {
-    if (newQuality === this.currentQuality) {
-      this.closeSettingsPopover();
-      return;
-    }
-
-    const driveMatch = (this.videoData.url || '').match(/drive=([a-zA-Z0-9_-]+)/);
-    const driveId = driveMatch ? driveMatch[1] : null;
-
-    if (newQuality !== 'original' && driveId) {
-      try {
-        const res = await fetch(`/api/stream/video-status?drive=${encodeURIComponent(driveId)}&quality=${newQuality}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (!data.ready) {
-            const pct = data.percent || 0;
-            if (window.showToast) {
-              window.showToast(`A versão ${newQuality} está sendo processada na nuvem (${pct}%). Continuando na versão Original...`);
-            }
-            this.closeSettingsPopover();
-            return;
-          }
-        }
-      } catch (err) {}
-    }
-
-    const curTime = this.video.currentTime || 0;
-    const wasPlaying = !this.video.paused;
-
-    this.currentQuality = newQuality;
-    const newUrl = this.buildStreamUrl(newQuality);
+  async switchQuality() {
     this.closeSettingsPopover();
-    this.updateSettingsUI();
-
-    this.setBuffering(true, true);
-    let restored = false;
-    const restoreTime = () => {
-      if (restored) return;
-      restored = true;
-      if (curTime > 0) {
-        try { this.video.currentTime = curTime; } catch (e) {}
-      }
-      this.setBuffering(false);
-      if (wasPlaying) {
-        this.video.play().catch(() => {});
-      }
-    };
-
-    this.video.addEventListener('loadedmetadata', restoreTime, { once: true });
-    this.video.addEventListener('canplay', restoreTime, { once: true });
-    this.video.src = newUrl;
-    this.video.load();
   }
 
   downloadStill() {

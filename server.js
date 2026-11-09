@@ -3573,111 +3573,22 @@ class SyncQueueManager {
     this.isProcessing = false;
   }
 
-  enqueueVideosFromProject(project, userDb) {
-    if (!project || !Array.isArray(project.videos)) return;
-    const videoExts = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi', 'flv', 'wmv', 'prores', 'mts', 'm2ts', 'ts', '3gp', 'mxf']);
-
-    let addedAny = false;
-    for (const v of project.videos) {
-      if (v.type === 'image' || (v.mimeType && v.mimeType.startsWith('image/'))) continue;
-      if (v.type === 'audio' || (v.mimeType && v.mimeType.startsWith('audio/'))) continue;
-
-      const fName = String(v.fileName || v.title || '').toLowerCase();
-      const ext = fName.split('.').pop() || '';
-      const mime = String(v.mimeType || '').toLowerCase();
-      const isVideo = mime.startsWith('video/') || mime === 'application/x-mpegurl' || videoExts.has(ext);
-      if (!isVideo) continue;
-
-      const fileId = v.driveFileId || (v.url && (v.url.match(/drive=([a-zA-Z0-9_-]+)/) || [])[1]) || v.localPath || v.id;
-      if (!fileId) continue;
-
-      // Se já tem proxy registrado no cloudStream, já está processado
-      if (v.cloudStream && v.cloudStream.renditions && (v.cloudStream.renditions['proxy'] || v.cloudStream.renditions['1080p'])) {
-        continue;
-      }
-
-      const alreadyInQueue = this.queue.some(item => item.fileId === fileId) || (this.activeItem && this.activeItem.fileId === fileId);
-      if (alreadyInQueue) continue;
-
-      const userId = userDb?.user?.id || userDb?.id || 'default';
-
-      this.queue.push({
-        id: `sync-${fileId}-${Date.now()}`,
-        projectId: project.id,
-        videoId: v.id,
-        fileId,
-        title: v.title || v.fileName || 'Vídeo',
-        fileName: v.fileName || `${v.title || 'video'}.mp4`,
-        isAlpha: Boolean(v.isAlpha),
-        percent: 0,
-        statusText: 'Na fila da nuvem',
-        userId
-      });
-      addedAny = true;
-    }
-
-    if (addedAny) {
-      this.broadcastState();
-      this.processNext();
-    }
+  enqueueVideosFromProject() {
+    // Opções de proxy desativadas
+    return;
   }
 
   broadcastState() {
     broadcastNotificationEvent({
       type: 'sync_queue_update',
-      activeItem: this.activeItem ? {
-        id: this.activeItem.id,
-        projectId: this.activeItem.projectId,
-        videoId: this.activeItem.videoId,
-        title: this.activeItem.title,
-        percent: this.activeItem.percent || 0,
-        statusText: this.activeItem.statusText || 'Processando proxy na nuvem...'
-      } : null,
-      queue: this.queue.map(item => ({
-        id: item.id,
-        projectId: item.projectId,
-        videoId: item.videoId,
-        title: item.title,
-        percent: 0,
-        statusText: 'Na fila da nuvem'
-      })),
-      totalCount: (this.activeItem ? 1 : 0) + this.queue.length
+      activeItem: null,
+      queue: [],
+      totalCount: 0
     });
   }
 
   async processNext() {
-    if (this.isProcessing || this.queue.length === 0) return;
-    this.isProcessing = true;
-    this.activeItem = this.queue.shift();
-    this.activeItem.percent = 0;
-    this.activeItem.statusText = 'Conectando ao stream da nuvem...';
-    this.broadcastState();
-
-    try {
-      const item = this.activeItem;
-      const userDb = storage.getUserDb(item.userId);
-      const project = (userDb.projects || []).find(p => p.id === item.projectId);
-      const video = project ? (project.videos || []).find(v => v.id === item.videoId) : null;
-
-      if (video) {
-        await ensureCloudStreamProxy(item.fileId, video, userDb, project, (pct, statusText) => {
-          if (this.activeItem && this.activeItem.fileId === item.fileId) {
-            this.activeItem.percent = pct;
-            if (statusText) this.activeItem.statusText = statusText;
-            this.broadcastState();
-          }
-        });
-      }
-    } catch (err) {
-      console.warn(`[SyncQueue] Erro ao processar proxy de ${this.activeItem?.title}:`, err.message);
-    } finally {
-      this.activeItem = null;
-      this.isProcessing = false;
-      this.broadcastState();
-      if (this.queue.length > 0) {
-        setImmediate(() => this.processNext());
-      }
-    }
+    return;
   }
 }
 
@@ -4113,56 +4024,24 @@ app.get('/api/stream/alpha-status', async (req, res) => {
   return res.json({ ready: true, converting: false, isAlpha: false });
 });
 
-// Status endpoint para o player saber se o vídeo (ProRes / codecs não-nativos ou rendições Frame.io) precisa de transcode ou já está pronto
+// Status endpoint para o player saber se o vídeo (ProRes / codecs não-nativos) precisa de transcode ou já está pronto
 app.get('/api/stream/video-status', async (req, res) => {
-  const quality = String(req.query.quality || 'original').toLowerCase();
-
   if (req.query.drive) {
     const fileId = String(req.query.drive);
     const found = storage.findVideoByDriveId(fileId);
     if (!found) return res.status(404).json({ error: 'Vídeo não encontrado' });
 
-    // Modo Original sempre pronto (exceto se for ProRes sem cache)
-    if (!quality || quality === 'original') {
-      const fileName = (found.video?.fileName || '').toLowerCase();
-      const mime = (found.video?.mimeType || '').toLowerCase();
-      const isLikelyProres = fileName.endsWith('.mov') || mime.includes('quicktime');
-      if (isLikelyProres) {
-        const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
-        if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
-          return res.json({ ready: true, converting: false, quality: 'original' });
-        }
-        return res.json({ ready: false, converting: true, quality: 'original' });
+    const fileName = (found.video?.fileName || '').toLowerCase();
+    const mime = (found.video?.mimeType || '').toLowerCase();
+    const isLikelyProres = fileName.endsWith('.mov') || mime.includes('quicktime');
+    if (isLikelyProres) {
+      const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
+      if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
+        return res.json({ ready: true, converting: false, quality: 'original' });
       }
-      return res.json({ ready: true, converting: false, quality: 'original' });
+      return res.json({ ready: false, converting: true, quality: 'original' });
     }
-
-    // Rendição Proxy / específica (ex: proxy, 1080p, 720p)
-    if (found.video?.cloudStream?.renditions?.[quality] || found.video?.cloudStream?.renditions?.proxy || found.video?.cloudStream?.renditions?.['1080p']) {
-      return res.json({ ready: true, percent: 100, converting: false, quality });
-    }
-
-    // Verifica se já está sendo transcodificado
-    const jobKey = `proxy_${fileId}`;
-    if (convertingCloudStreamJobs.has(jobKey) || convertingCloudStreamJobs.has(`${fileId}_${quality}`)) {
-      return res.json({ ready: false, percent: 35, converting: true, quality });
-    }
-
-    // Verifica se está ativo na fila de sincronização
-    if (syncQueueManager.activeItem && syncQueueManager.activeItem.fileId === fileId) {
-      return res.json({ ready: false, percent: syncQueueManager.activeItem.percent || 0, converting: true, quality });
-    }
-    const isQueued = syncQueueManager.queue.some(item => item.fileId === fileId);
-    if (isQueued) {
-      return res.json({ ready: false, percent: 0, queued: true, converting: false, quality });
-    }
-
-    // Se não estiver na fila nem sendo processado, inicia respeitando o lock global de concorrência
-    ensureCloudStreamProxy(fileId, found.video, found.userDb, found.project).catch(err => {
-      console.warn(`[CloudStream] Aviso ao gerar proxy sob demanda ${quality}:`, err.message);
-    });
-
-    return res.json({ ready: false, percent: 10, converting: true, quality });
+    return res.json({ ready: true, converting: false, quality: 'original' });
   }
 
   if (req.query.path) {
@@ -4443,29 +4322,6 @@ app.get('/api/stream', async (req, res) => {
         if (!res.headersSent) res.status(500).end();
         else res.destroy();
       });
-    }
-
-    const quality = String(req.query.quality || 'original').toLowerCase();
-
-    // Se qualidade Proxy foi solicitada
-    if (quality === 'proxy' || quality === '1080p' || quality === '720p' || quality === '360p') {
-      const isAlpha = Boolean(video?.isAlpha);
-      const ext = isAlpha ? 'webm' : 'mp4';
-      const contentType = isAlpha ? 'video/webm' : 'video/mp4';
-
-      // 1. Servir do Drive .cloud_stream se disponível
-      const cloudFileId = video?.cloudStream?.renditions?.proxy || video?.cloudStream?.renditions?.[quality] || video?.cloudStream?.renditions?.['1080p'];
-      if (cloudFileId) {
-        return driveApi.streamFile(req, res, userDb, cloudFileId, {
-          download: false,
-          fileName: `stream_proxy_${fileId}.${ext}`,
-          mimeType: contentType
-        }).catch(err => {
-          console.warn('[Stream] Falha no stream do Drive .cloud_stream, usando original:', err.message);
-        });
-      }
-
-      // Se o proxy ainda não está pronto, prossegue abaixo e serve a versão Original diretamente com stream contínuo (sem erros nem interrupções)
     }
 
     // REPRODUÇÃO ORIGINAL (Padrão)

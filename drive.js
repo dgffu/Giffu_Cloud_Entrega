@@ -150,6 +150,8 @@ function toVideo(file, classifyResolution) {
     url: `/api/stream?drive=${file.id}`,
     driveFileId: file.id,
     fileName,
+    width: hasDims ? width : null,
+    height: hasDims ? height : null,
     resolution: hasDims ? classifyResolution(width, height) : classifyResolution('FHD'),
     duration: formatDuration(meta.durationMillis),
     size: formatSize(file.size),
@@ -397,11 +399,11 @@ async function mirrorFolder(readDB, link, classifyResolution) {
     const children = await listChildren(readDB, current.id);
 
     for (const child of children) {
+      const childName = String(child.name || '').trim();
+      if (childName.startsWith('.') || childName.toLowerCase() === 'zomments' || childName.toLowerCase() === '.cloud_stream') {
+        continue;
+      }
       if (isFolder(child)) {
-        // Ignora a pasta interna "Zomments" para que não apareça na galeria de entregas
-        if (String(child.name || '').trim().toLowerCase() === 'zomments') {
-          continue;
-        }
         if (!visited.has(child.id) && (folders.length + queue.length) < MAX_TOTAL_FOLDERS) {
           visited.add(child.id);
           const relPath = current.path ? `${current.path}/${child.name}` : child.name;
@@ -913,6 +915,65 @@ async function getOrCreateZommentsFolder(readDB, rootFolderId) {
   throw translateApiError(createRes);
 }
 
+// Obtém ou cria a pasta oculta ".cloud_stream" dentro da pasta de destino para vídeos otimizados
+async function getOrCreateCloudStreamFolder(readDB, parentFolderId) {
+  if (!parentFolderId || !ID_RE.test(parentFolderId)) {
+    throw makeError('ID de pasta pai inválido para .cloud_stream.', 'DRIVE_BAD_ID', 400);
+  }
+  const token = await google.getDriveAccessToken(readDB);
+
+  // 1. Procura por pasta existente chamada ".cloud_stream" dentro da pasta pai
+  const q = `'${parentFolderId}' in parents and name = '.cloud_stream' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,mimeType)`;
+  const searchRes = await google.request(searchUrl, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  if (searchRes.status === 200 && searchRes.json && Array.isArray(searchRes.json.files) && searchRes.json.files.length > 0) {
+    return searchRes.json.files[0];
+  }
+
+  // 2. Se não existir, cria a pasta ".cloud_stream"
+  const body = JSON.stringify({
+    name: '.cloud_stream',
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: [parentFolderId]
+  });
+  const createRes = await google.request('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body)
+    },
+    body
+  });
+
+  if ((createRes.status === 200 || createRes.status === 201) && createRes.json && createRes.json.id) {
+    return createRes.json;
+  }
+  throw translateApiError(createRes);
+}
+
+// Busca se já existe um arquivo específico dentro de uma pasta .cloud_stream
+async function findStreamFileInDrive(readDB, cloudStreamFolderId, fileName) {
+  if (!cloudStreamFolderId || !ID_RE.test(cloudStreamFolderId)) return null;
+  try {
+    const token = await google.getDriveAccessToken(readDB);
+    const q = `'${cloudStreamFolderId}' in parents and name = '${fileName}' and trashed = false`;
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,mimeType,size)`;
+    const searchRes = await google.request(searchUrl, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (searchRes.status === 200 && searchRes.json && Array.isArray(searchRes.json.files) && searchRes.json.files.length > 0) {
+      return searchRes.json.files[0];
+    }
+  } catch (err) {}
+  return null;
+}
+
 // Lista arquivos dentro de uma pasta do Google Drive
 async function listFilesInFolder(readDB, folderId) {
   if (!ID_RE.test(folderId)) return [];
@@ -925,7 +986,7 @@ async function listFilesInFolder(readDB, folderId) {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (res.status === 200 && res.json && Array.isArray(res.json.files)) {
-      return res.json.files;
+      return res.json.files.filter(f => !String(f.name || '').startsWith('.'));
     }
     return [];
   } catch (err) {
@@ -1031,6 +1092,8 @@ module.exports = {
   renameFile,
   getFileMetadata,
   getOrCreateZommentsFolder,
+  getOrCreateCloudStreamFolder,
+  findStreamFileInDrive,
   listFilesInFolder,
   resolveUniqueFileName,
   deleteDriveFileOrFolder,

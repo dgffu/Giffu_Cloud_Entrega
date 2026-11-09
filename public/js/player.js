@@ -17,9 +17,17 @@ class CustomVideoPlayer {
     const mimeType = (this.videoData.mimeType || '').toLowerCase();
     this.isMov = fileName.endsWith('.mov') || mimeType.includes('quicktime');
     this.isAlpha = Boolean(this.videoData.isAlpha);
+    this.isNonBrowserCodec = this.isAlpha || this.isMov;
     this.alphaBgMode = this.isAlpha ? 'checkerboard' : 'black';
     this._userMutedIntentionally = false;
     this.audioHealthTimer = null;
+
+    // Qualidade de reprodução inicial:
+    // Requisito 1: Arquivos ProRes/Alpha reproduzem direto a versão otimizada (proxy)
+    // Requisito 2: Demais arquivos SEMPRE exibem a versão ORIGINAL por padrão
+    this.currentQuality = this.isNonBrowserCodec ? 'proxy' : 'original';
+    this._bufferTimestamps = [];
+    this._bufferPromptCooldownUntil = 0;
 
     this.init();
   }
@@ -150,10 +158,7 @@ class CustomVideoPlayer {
     const downloadFileName = this.videoData.fileName || (this.videoData.title + (this.isMov ? '.mov' : '.mp4'));
     const downloadUrl = `${this.videoData.url}${this.videoData.url.includes('?') ? '&' : '?'}download=1`;
 
-    let streamUrl = this.videoData.url;
-    if (this.isAlpha) {
-      streamUrl = `${streamUrl}${streamUrl.includes('?') ? '&' : '?'}alpha=1`;
-    }
+    const streamUrl = this.buildStreamUrl(this.currentQuality);
 
     this.container.innerHTML = `
       <!-- Video Element -->
@@ -163,6 +168,17 @@ class CustomVideoPlayer {
       <div class="alpha-transcode-overlay" id="alphaTranscodeOverlay" style="display: none;">
         <div class="alpha-transcode-spinner"></div>
         <div class="alpha-transcode-text" id="alphaTranscodeText">Otimizando vídeo para reprodução...</div>
+      </div>
+
+      <!-- In-Player Buffer Suggestion Modal -->
+      <div class="player-buffer-suggestion-overlay" id="playerBufferSuggestion" style="display: none;">
+        <div class="player-buffer-suggestion-card">
+          <p class="player-buffer-suggestion-text">A reprodução pode estar sendo afetada devido a conexão internet-servidor. Deseja reproduzir uma versão e qualidade reduzida?</p>
+          <div class="player-buffer-suggestion-actions">
+            <button type="button" class="btn-buffer-no" id="btnBufferSuggestNo">Não</button>
+            <button type="button" class="btn-buffer-yes" id="btnBufferSuggestYes">Sim</button>
+          </div>
+        </div>
       </div>
 
       <!-- Center Play/Pause Overlay - ONLY APPEARS ON HOVER -->
@@ -177,10 +193,10 @@ class CustomVideoPlayer {
         <span class="loading-spinner player-loading-spinner"></span>
       </div>
 
-      <!-- Quality Badge (Preserving 100% Original Studio Quality) -->
-      <div class="player-top-badge" id="playerTopBadge">
-        <span id="playerQualityLabel">${this.classifyResolution(this.videoData.resolution)}</span>
-      </div>
+      <!-- Quality Badge / Alternating Button (ORIGINAL / PROXY / LQ) -->
+      <button type="button" class="player-top-badge player-quality-btn" id="playerTopBadge" title="${this.getQualityTooltip()}">
+        <span id="playerQualityLabel">${this.getQualityLabel()}</span>
+      </button>
 
       <!-- Bottom Control Bar -->
       <div class="player-controls-bar">
@@ -290,7 +306,9 @@ class CustomVideoPlayer {
     this.btnResetFrameCover = this.container.querySelector('#btnResetFrameCover');
     this.btnPlayerToggleComments = this.container.querySelector('#btnPlayerToggleComments');
     this.btnFullscreen = this.container.querySelector('#btnFullscreen');
+    this.playerTopBadge = this.container.querySelector('#playerTopBadge');
     this.qualityBadgeText = this.container.querySelector('#playerQualityLabel');
+    this.updateQualityBadge();
   }
 
   classifyResolution(input, height) {
@@ -333,6 +351,144 @@ class CustomVideoPlayer {
     }
 
     return 'FHD';
+  }
+
+  buildStreamUrl(quality) {
+    const base = this.videoData.url || '';
+    const sep = base.includes('?') ? '&' : '?';
+    let url = `${base}${sep}quality=${quality || this.currentQuality}`;
+    if (this.isAlpha) {
+      url += '&alpha=1';
+    }
+    return url;
+  }
+
+  isLqAvailable() {
+    const height = Number(this.videoData.realHeight || this.videoData.height) || 0;
+    if (height > 0) {
+      return height > 720;
+    }
+    const res = String(this.videoData.resolution || '').toUpperCase();
+    if (['HD', 'SD', '720', '720P', '480', '480P', '360', '360P', '540'].includes(res)) {
+      return false;
+    }
+    return true;
+  }
+
+  getQualityLabel(quality = this.currentQuality) {
+    if (quality === 'proxy') return 'PROXY';
+    if (quality === 'lq') return 'LQ';
+    return this.classifyResolution(this.videoData.realHeight ? (this.videoData.realWidth || this.videoData.resolution) : this.videoData.resolution, this.videoData.realHeight || this.videoData.height);
+  }
+
+  getQualityTooltip(quality = this.currentQuality) {
+    const originalRes = this.classifyResolution(this.videoData.realHeight ? (this.videoData.realWidth || this.videoData.resolution) : this.videoData.resolution, this.videoData.realHeight || this.videoData.height);
+    if (quality === 'proxy') {
+      return `Proxy Otimizado (${originalRes}) • Clique para alternar`;
+    }
+    if (quality === 'lq') {
+      return 'Qualidade Baixa (1080p LQ) • Clique para alternar';
+    }
+    return `Qualidade Original (${originalRes}) • Clique para alternar`;
+  }
+
+  updateQualityBadge() {
+    if (!this.playerTopBadge || !this.qualityBadgeText) return;
+    this.qualityBadgeText.textContent = this.getQualityLabel();
+    this.playerTopBadge.title = this.getQualityTooltip();
+    this.playerTopBadge.classList.remove('is-proxy', 'is-lq');
+    if (this.currentQuality === 'proxy') {
+      this.playerTopBadge.classList.add('is-proxy');
+    } else if (this.currentQuality === 'lq') {
+      this.playerTopBadge.classList.add('is-lq');
+    }
+  }
+
+  toggleQuality() {
+    let nextQuality = 'original';
+    const hasLq = this.isLqAvailable();
+
+    if (this.isNonBrowserCodec) {
+      // Arquivos não nativos do navegador (ProRes / Alpha) alternam entre PROXY e LQ
+      if (this.currentQuality === 'proxy') {
+        nextQuality = hasLq ? 'lq' : 'proxy';
+      } else {
+        nextQuality = 'proxy';
+      }
+    } else {
+      // Demais arquivos padrão: ORIGINAL -> PROXY -> LQ -> ORIGINAL
+      if (this.currentQuality === 'original') {
+        nextQuality = 'proxy';
+      } else if (this.currentQuality === 'proxy') {
+        nextQuality = hasLq ? 'lq' : 'original';
+      } else {
+        nextQuality = 'original';
+      }
+    }
+
+    if (nextQuality === this.currentQuality) return;
+    this.switchQuality(nextQuality);
+  }
+
+  switchQuality(quality) {
+    if (!this.video) return;
+    this.currentQuality = quality;
+    this.updateQualityBadge();
+
+    const curTime = this.video.currentTime || 0;
+    const wasPlaying = this.isPlaying && !this.video.paused;
+    const newUrl = this.buildStreamUrl(quality);
+
+    this.setBuffering(true, true);
+
+    let restored = false;
+    const restoreTime = () => {
+      if (restored) return;
+      restored = true;
+      if (curTime > 0) {
+        try { this.video.currentTime = curTime; } catch (e) {}
+      }
+      this.setBuffering(false);
+      if (wasPlaying) {
+        this.video.play().catch(() => {});
+      }
+    };
+
+    this.video.addEventListener('loadedmetadata', restoreTime, { once: true });
+    this.video.addEventListener('canplay', restoreTime, { once: true });
+    this.video.src = newUrl;
+    this.video.load();
+  }
+
+  checkBufferThreshold() {
+    // Verificação de buffer: apenas no modo original (autor e cliente)
+    if (this.currentQuality !== 'original') return;
+    const now = Date.now();
+    if (now < this._bufferPromptCooldownUntil) return;
+    if (this.video && this.video.seeking) return;
+
+    // Filtra ocorrências em menos de 6 segundos (< 6000ms)
+    this._bufferTimestamps = this._bufferTimestamps.filter(t => (now - t) < 6000);
+    this._bufferTimestamps.push(now);
+
+    if (this._bufferTimestamps.length >= 2) {
+      this.showBufferSuggestionPrompt();
+      this._bufferTimestamps = [];
+    }
+  }
+
+  showBufferSuggestionPrompt() {
+    const el = this.container.querySelector('#playerBufferSuggestion');
+    if (el) {
+      el.style.display = 'flex';
+    }
+  }
+
+  hideBufferSuggestionPrompt() {
+    const el = this.container.querySelector('#playerBufferSuggestion');
+    if (el) {
+      el.style.display = 'none';
+    }
   }
 
   formatTime(seconds) {
@@ -941,10 +1097,9 @@ class CustomVideoPlayer {
       const realWidth = this.video.videoWidth;
       const realHeight = this.video.videoHeight;
       if (realWidth && realHeight) {
-        const qualityLabel = this.classifyResolution(realWidth, realHeight);
-        if (this.qualityBadgeText) {
-          this.qualityBadgeText.textContent = qualityLabel;
-        }
+        this.videoData.realWidth = realWidth;
+        this.videoData.realHeight = realHeight;
+        this.updateQualityBadge();
         if (window.detectAspectRatio) {
           const detectedAspect = window.detectAspectRatio(realWidth, realHeight);
           if (detectedAspect) {
@@ -1017,6 +1172,7 @@ class CustomVideoPlayer {
       }
       this.setBuffering(true, false);
       this.updateBufferProgress();
+      this.checkBufferThreshold();
     });
 
     this.video.addEventListener('stalled', () => {
@@ -1481,6 +1637,32 @@ class CustomVideoPlayer {
       this.toggleFullscreen();
     });
 
+    // Alternância de Qualidade (ORIGINAL / PROXY / LQ)
+    if (this.playerTopBadge) {
+      this.playerTopBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleQuality();
+      });
+    }
+
+    // Modal de Sugestão de Buffer (< 6s no modo original)
+    const btnBufferNo = this.container.querySelector('#btnBufferSuggestNo');
+    const btnBufferYes = this.container.querySelector('#btnBufferSuggestYes');
+    if (btnBufferNo) {
+      btnBufferNo.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.hideBufferSuggestionPrompt();
+        this._bufferPromptCooldownUntil = Date.now() + 60000; // 60 segundos de cooldown
+      });
+    }
+    if (btnBufferYes) {
+      btnBufferYes.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.hideBufferSuggestionPrompt();
+        this.switchQuality('proxy');
+      });
+    }
+
     // Keyboard Shortcuts
     this.keyHandler = (e) => {
       // Don't trigger if user is typing in textarea/input
@@ -1630,7 +1812,7 @@ class CustomVideoPlayer {
     if (!driveId && !localPath) return;
 
     const overlay = this.container.querySelector('#alphaTranscodeOverlay');
-    const queryParam = driveId ? `drive=${encodeURIComponent(driveId)}` : `path=${localPath}`;
+    const queryParam = `${driveId ? `drive=${encodeURIComponent(driveId)}` : `path=${localPath}`}&quality=${this.currentQuality}`;
 
     const check = async () => {
       try {
@@ -1652,7 +1834,7 @@ class CustomVideoPlayer {
         } else if (data.ready) {
           if (overlay) overlay.style.display = 'none';
           if (this.video && (this.video.error || !this.video.readyState)) {
-            const streamUrl = `${this.videoData.url}${this.videoData.url.includes('?') ? '&' : '?'}alpha=1`;
+            const streamUrl = this.buildStreamUrl(this.currentQuality);
             if (this.video.src !== streamUrl) {
               this.video.src = streamUrl;
               this.video.load();
@@ -1674,7 +1856,7 @@ class CustomVideoPlayer {
 
     const overlay = this.container.querySelector('#alphaTranscodeOverlay');
     const textEl = this.container.querySelector('#alphaTranscodeText');
-    const queryParam = driveId ? `drive=${encodeURIComponent(driveId)}` : `path=${localPath}`;
+    const queryParam = `${driveId ? `drive=${encodeURIComponent(driveId)}` : `path=${localPath}`}&quality=${this.currentQuality}`;
 
     const check = async () => {
       try {
@@ -1696,7 +1878,7 @@ class CustomVideoPlayer {
         } else if (data.ready) {
           if (overlay) overlay.style.display = 'none';
           if (this.video && (this.video.error || !this.video.readyState || isRetryAfterError)) {
-            const streamUrl = this.videoData.url;
+            const streamUrl = this.buildStreamUrl(this.currentQuality);
             const bustUrl = `${streamUrl}${streamUrl.includes('?') ? '&' : '?'}vready=${Date.now()}`;
             this.video.src = bustUrl;
             this.video.load();

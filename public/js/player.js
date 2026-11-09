@@ -20,9 +20,6 @@ class CustomVideoPlayer {
     this.alphaBgMode = this.isAlpha ? 'checkerboard' : 'black';
     this._userMutedIntentionally = false;
     this.audioHealthTimer = null;
-    this.currentQuality = 'original'; // Frame.io: ORIGINAL sempre abre por padrão
-    this.isSettingsOpen = false;
-    this.isQualitySubmenuOpen = false;
 
     this.init();
   }
@@ -98,7 +95,7 @@ class CustomVideoPlayer {
 
       if (!this.isInteracting) {
         this.inactivityTimer = setTimeout(() => {
-          if (!this.isInteracting && !this.isSettingsOpen) {
+          if (!this.isInteracting) {
             this.container.classList.remove('user-active');
             this.container.classList.add('user-inactive');
           }
@@ -108,7 +105,7 @@ class CustomVideoPlayer {
 
     this.hideHUDImmediate = () => {
       clearTimeout(this.inactivityTimer);
-      if (!this.isInteracting && !this.isSettingsOpen) {
+      if (!this.isInteracting) {
         this.container.classList.remove('user-active');
         this.container.classList.add('user-inactive');
       }
@@ -129,7 +126,6 @@ class CustomVideoPlayer {
 
     this.onMouseLeave = () => {
       if (Date.now() - this._lastTouchTime < 800) return;
-      if (this.isSettingsOpen) return;
       this.hideHUDImmediate();
     };
 
@@ -259,57 +255,6 @@ class CustomVideoPlayer {
               <svg viewBox="0 0 24 24"><path d="M21.99 4c0-1.1-.89-2-1.99-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18z"/></svg>
             </button>
 
-            <!-- Frame.io Settings & Quality Menu -->
-            <div class="player-settings-wrapper" id="playerSettingsWrapper">
-              <button type="button" class="player-btn player-settings-btn" id="btnSettings" title="Configurações e Qualidade">
-                <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-                <span class="player-gear-badge" id="playerGearBadge">HD</span>
-              </button>
-
-              <div class="player-settings-popover" id="playerSettingsPopover" style="display: none;">
-                <!-- Main Panel -->
-                <div class="settings-panel settings-main-panel" id="settingsMainPanel">
-                  <div class="settings-menu-item" id="menuItemQuality">
-                    <div class="settings-item-left">
-                      <svg class="settings-item-icon" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z"/></svg>
-                      <span class="settings-item-label">Quality</span>
-                    </div>
-                    <div class="settings-item-right">
-                      <span class="settings-item-value" id="settingsCurrentQualityText">Original</span>
-                      <svg class="settings-chevron" viewBox="0 0 24 24"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
-                    </div>
-                  </div>
-
-                  <div class="settings-divider"></div>
-
-                  ${(this.options.canSetCover !== false) ? `
-                    <div class="settings-menu-item" id="menuItemSetCover">
-                      <div class="settings-item-left">
-                        <svg class="settings-item-icon" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
-                        <span class="settings-item-label">Set Frame as Thumb</span>
-                      </div>
-                    </div>
-                  ` : ''}
-
-                  <div class="settings-menu-item" id="menuItemDownloadStill">
-                    <div class="settings-item-left">
-                      <svg class="settings-item-icon" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM12 17l-5-5h3V9h4v3h3l-5 5z"/></svg>
-                      <span class="settings-item-label">Download Still</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Submenu Panel: Quality List -->
-                <div class="settings-panel settings-sub-panel" id="settingsQualitySubmenu" style="display: none;">
-                  <div class="settings-submenu-header" id="btnBackToMainMenu">
-                    <svg class="settings-back-icon" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
-                    <span>Quality</span>
-                  </div>
-                  <div class="settings-quality-list" id="settingsQualityOptionsList"></div>
-                </div>
-              </div>
-            </div>
-
             <!-- Fullscreen -->
             <button class="player-btn" id="btnFullscreen" title="Tela Cheia (F)">
               <svg viewBox="0 0 24 24" id="fullscreenIcon"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
@@ -438,165 +383,6 @@ class CustomVideoPlayer {
     }
     const formatName = this.getFormatResolutionName(rawLabel);
     return { width: w, height: h, rawLabel, formatName };
-  }
-
-  updateSettingsUI() {
-    const { originalLabel } = this.getQualityLabels();
-    const gearBadge = this.container.querySelector('#playerGearBadge');
-    const qualityText = this.container.querySelector('#settingsCurrentQualityText');
-
-    const badgeText = originalLabel === '4K' ? '4K' : (['1080p', '720p'].includes(originalLabel) ? 'HD' : '');
-    const currentText = `Original (${originalLabel})`;
-
-    this.currentQuality = 'original';
-
-    if (gearBadge) {
-      gearBadge.textContent = badgeText || 'HD';
-      gearBadge.style.display = badgeText ? 'inline-block' : 'none';
-    }
-    if (qualityText) qualityText.textContent = currentText;
-    if (this.qualityBadgeText) this.qualityBadgeText.textContent = originalLabel;
-
-    this.renderQualitySubmenu();
-  }
-
-  renderQualitySubmenu() {
-    const listEl = this.container.querySelector('#settingsQualityOptionsList');
-    if (!listEl) return;
-
-    const { originalLabel } = this.getQualityLabels();
-
-    const options = [
-      {
-        id: 'original',
-        name: `Original (${originalLabel})`,
-        tag: originalLabel === '4K' ? '4K' : (['1080p', '720p'].includes(originalLabel) ? 'HD' : '')
-      }
-    ];
-
-    let html = '';
-    for (const opt of options) {
-      html += `
-        <div class="settings-quality-item is-selected" data-quality="${opt.id}">
-          <div class="quality-label-wrap">
-            <span class="quality-name">${opt.name}</span>
-            ${opt.tag ? `<span class="quality-tag">${opt.tag}</span>` : ''}
-          </div>
-          <svg class="quality-check-icon" viewBox="0 0 24 24">
-            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-          </svg>
-        </div>
-      `;
-    }
-
-    listEl.innerHTML = html;
-
-    listEl.querySelectorAll('.settings-quality-item').forEach(itemEl => {
-      itemEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.closeSettingsPopover();
-      });
-    });
-  }
-
-  async switchQuality() {
-    this.closeSettingsPopover();
-  }
-
-  downloadStill() {
-    this.closeSettingsPopover();
-    if (!this.video) return;
-
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = this.video.videoWidth || 1920;
-      canvas.height = this.video.videoHeight || 1080;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(this.video, 0, 0, canvas.width, canvas.height);
-
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          if (window.showToast) window.showToast('Não foi possível capturar o frame');
-          return;
-        }
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        const safeTitle = (this.videoData.title || 'still').replace(/[^a-zA-Z0-9_-]/g, '_');
-        const tc = this.formatTime(this.video.currentTime).replace(/:/g, '-');
-        a.href = url;
-        a.download = `${safeTitle}_frame_${tc}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        if (window.showToast) window.showToast('Still baixado em alta resolução!');
-      }, 'image/png');
-    } catch (e) {
-      if (window.showToast) window.showToast('Erro ao baixar still');
-    }
-  }
-
-  toggleSettingsPopover() {
-    if (this.isSettingsOpen) {
-      this.closeSettingsPopover();
-    } else {
-      this.openSettingsPopover();
-    }
-  }
-
-  openSettingsPopover() {
-    this.isSettingsOpen = true;
-    this.isQualitySubmenuOpen = false;
-    const popover = this.container.querySelector('#playerSettingsPopover');
-    const mainPanel = this.container.querySelector('#settingsMainPanel');
-    const subPanel = this.container.querySelector('#settingsQualitySubmenu');
-    const menuItemQuality = this.container.querySelector('#menuItemQuality');
-    if (popover) {
-      popover.style.display = 'flex';
-    }
-    if (mainPanel) mainPanel.style.display = 'flex';
-    if (subPanel) subPanel.style.display = 'none';
-    if (menuItemQuality) menuItemQuality.classList.remove('is-active');
-    this.updateSettingsUI();
-  }
-
-  closeSettingsPopover() {
-    this.isSettingsOpen = false;
-    this.isQualitySubmenuOpen = false;
-    const popover = this.container.querySelector('#playerSettingsPopover');
-    const menuItemQuality = this.container.querySelector('#menuItemQuality');
-    if (popover) {
-      popover.style.display = 'none';
-    }
-    if (menuItemQuality) menuItemQuality.classList.remove('is-active');
-  }
-
-  openQualitySubmenu() {
-    this.isQualitySubmenuOpen = true;
-    const mainPanel = this.container.querySelector('#settingsMainPanel');
-    const subPanel = this.container.querySelector('#settingsQualitySubmenu');
-    const menuItemQuality = this.container.querySelector('#menuItemQuality');
-    const isWide = (this.container.clientWidth || window.innerWidth) >= 500;
-    if (isWide) {
-      if (mainPanel) mainPanel.style.display = 'flex';
-      if (subPanel) subPanel.style.display = 'flex';
-      if (menuItemQuality) menuItemQuality.classList.add('is-active');
-    } else {
-      if (mainPanel) mainPanel.style.display = 'none';
-      if (subPanel) subPanel.style.display = 'flex';
-      if (menuItemQuality) menuItemQuality.classList.remove('is-active');
-    }
-    this.renderQualitySubmenu();
-  }
-
-  closeQualitySubmenu() {
-    this.isQualitySubmenuOpen = false;
-    const mainPanel = this.container.querySelector('#settingsMainPanel');
-    const subPanel = this.container.querySelector('#settingsQualitySubmenu');
-    const menuItemQuality = this.container.querySelector('#menuItemQuality');
-    if (mainPanel) mainPanel.style.display = 'flex';
-    if (subPanel) subPanel.style.display = 'none';
-    if (menuItemQuality) menuItemQuality.classList.remove('is-active');
   }
 
   formatTime(seconds) {
@@ -1226,7 +1012,10 @@ class CustomVideoPlayer {
         if (this.isFullscreen()) {
           this.updateFullscreenOrientation();
         }
-        this.updateSettingsUI();
+        const resInfo = this.getResolutionInfo();
+        if (this.qualityBadgeText) {
+          this.qualityBadgeText.textContent = resInfo.rawLabel;
+        }
       }
     });
 
@@ -1740,67 +1529,6 @@ class CustomVideoPlayer {
       });
     }
 
-    // Settings & Quality Menu (Frame.io)
-    const btnSettings = this.container.querySelector('#btnSettings');
-    const settingsWrapper = this.container.querySelector('#playerSettingsWrapper');
-    const menuItemQuality = this.container.querySelector('#menuItemQuality');
-    const btnBackToMainMenu = this.container.querySelector('#btnBackToMainMenu');
-    const menuItemSetCover = this.container.querySelector('#menuItemSetCover');
-    const menuItemDownloadStill = this.container.querySelector('#menuItemDownloadStill');
-
-    if (btnSettings) {
-      btnSettings.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.toggleSettingsPopover();
-      });
-    }
-
-    if (menuItemQuality) {
-      menuItemQuality.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const isWide = (this.container.clientWidth || window.innerWidth) >= 500;
-        if (this.isQualitySubmenuOpen && isWide) {
-          this.closeQualitySubmenu();
-        } else {
-          this.openQualitySubmenu();
-        }
-      });
-    }
-
-    if (btnBackToMainMenu) {
-      btnBackToMainMenu.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.closeQualitySubmenu();
-      });
-    }
-
-    if (menuItemSetCover) {
-      menuItemSetCover.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.closeSettingsPopover();
-        if (typeof this.options.onSetCover === 'function') {
-          this.options.onSetCover(this.captureCurrentFrame());
-        }
-      });
-    }
-
-    if (menuItemDownloadStill) {
-      menuItemDownloadStill.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.downloadStill();
-      });
-    }
-
-    this.onDocClickCloseSettings = (e) => {
-      if (this.isSettingsOpen && settingsWrapper && !settingsWrapper.contains(e.target)) {
-        this.closeSettingsPopover();
-      }
-    };
-    document.addEventListener('click', this.onDocClickCloseSettings);
-
-    // Initial settings UI sync
-    this.updateSettingsUI();
-
     // Fullscreen
     this.btnFullscreen.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2069,10 +1797,6 @@ class CustomVideoPlayer {
         this.container.removeEventListener('touchstart', this.onTouchStart);
       }
       this.container.removeEventListener('touchmove', this.onActivity);
-    }
-    this.closeSettingsPopover();
-    if (this.onDocClickCloseSettings) {
-      document.removeEventListener('click', this.onDocClickCloseSettings);
     }
     if (this.onOrientationChange) {
       window.removeEventListener('orientationchange', this.onOrientationChange);

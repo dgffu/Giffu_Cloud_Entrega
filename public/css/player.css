@@ -447,7 +447,7 @@
   visibility: visible !important;
 }
 
-/* Quality Badge / Toggle Button in Player Top-Right (ORIGINAL / PROXY / LQ) */
+/* Quality Badge in Player Top-Right (Clean Resolution Only) */
 .player-top-badge {
   position: absolute;
   top: 16px;
@@ -471,120 +471,14 @@
   justify-content: center;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.3s ease, visibility 0.3s ease, background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
   user-select: none;
-  pointer-events: auto;
-  cursor: pointer;
-  outline: none;
+  pointer-events: none;
 }
 
 .custom-player-wrapper.user-active .player-top-badge {
   opacity: 1;
   visibility: visible;
-}
-
-.player-top-badge:hover {
-  background: rgba(0, 0, 0, 0.9);
-  border-color: rgba(255, 255, 255, 0.35);
-  transform: translateY(-1px);
-}
-
-.player-top-badge:active {
-  transform: scale(0.96);
-}
-
-.player-top-badge.is-proxy {
-  border-color: rgba(255, 102, 0, 0.5);
-  color: #ff9944;
-}
-
-.player-top-badge.is-lq {
-  border-color: rgba(148, 163, 184, 0.45);
-  color: #cbd5e1;
-}
-
-/* In-Player Buffer Suggestion Overlay */
-.player-buffer-suggestion-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 40;
-  background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  animation: fadeIn 0.25s ease-out;
-}
-
-.player-buffer-suggestion-card {
-  background: #1e293b;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
-  border-radius: 14px;
-  max-width: 440px;
-  width: 100%;
-  padding: 22px 24px;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.player-buffer-suggestion-text {
-  font-size: 14px;
-  line-height: 1.55;
-  color: #f1f5f9;
-  font-weight: 500;
-  margin: 0;
-}
-
-.player-buffer-suggestion-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-}
-
-.btn-buffer-no {
-  background: #334155;
-  color: #f8fafc;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 8px 22px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease, transform 0.1s ease;
-}
-
-.btn-buffer-no:hover {
-  background: #475569;
-}
-
-.btn-buffer-no:active {
-  transform: scale(0.97);
-}
-
-.btn-buffer-yes {
-  background: var(--brand-orange, #ff6600);
-  color: #ffffff;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 24px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s ease, transform 0.1s ease;
-}
-
-.btn-buffer-yes:hover {
-  opacity: 0.92;
-}
-
-.btn-buffer-yes:active {
-  transform: scale(0.97);
 }
 
 /* Multifunction Bottom Control Bar */

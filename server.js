@@ -223,7 +223,6 @@ function applyMirror(target, draft) {
   const oldVideoBrand = new Map((target.videos || []).map(v => [v.driveFileId || v.id, v.hideBrandName]));
   const oldVideoPassword = new Map((target.videos || []).map(v => [v.driveFileId || v.id, v.password]));
   const oldVideoColor = new Map((target.videos || []).map(v => [v.driveFileId || v.id, v.color]));
-  const oldCloudStream = new Map((target.videos || []).map(v => [v.driveFileId || v.id, v.cloudStream]));
   const oldCustomCovers = new Map((target.videos || []).map(v => [v.driveFileId || v.id, { customThumbnailUrl: v.customThumbnailUrl, coverUrl: v.coverUrl }]));
   (draft.videos || []).forEach(v => {
     const key = v.driveFileId || v.id;
@@ -244,9 +243,6 @@ function applyMirror(target, draft) {
     }
     if (v.color === undefined && oldVideoColor.has(key) && oldVideoColor.get(key)) {
       v.color = oldVideoColor.get(key);
-    }
-    if (!v.cloudStream && oldCloudStream.has(key) && oldCloudStream.get(key)) {
-      v.cloudStream = oldCloudStream.get(key);
     }
     if (oldCustomCovers.has(key)) {
       const cov = oldCustomCovers.get(key);
@@ -3044,121 +3040,18 @@ async function ensureLocalWebCompatibleVideo(filePath) {
 }
 
 async function ensureDriveWebCompatibleVideo(fileId, video, userDb) {
-  return ensureCloudStreamProxy(fileId, video, userDb, 'proxy');
-}
-
-// Transcodificador otimizado para reprodução web (PROXY e LQ)
-// Garante o equilíbrio perfeito entre qualidade visual, suporte total a codecs/alpha e economia de espaço no Drive
-function transcodeStreamProxy({ input, output, isAlpha, quality }) {
-  let ffmpegPath = 'ffmpeg';
-  try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
-
-  return new Promise((resolve, reject) => {
-    let args = ['-y', '-i', input, '-map', '0:v:0', '-map', '0:a?'];
-
-    if (isAlpha) {
-      // Vídeo com transparência (Alpha) -> WebM VP9 com canal alfa (yuva420p)
-      if (quality === 'lq') {
-        args.push(
-          '-vf', "scale='min(1920,iw)':-2",
-          '-c:v', 'libvpx-vp9',
-          '-pix_fmt', 'yuva420p',
-          '-speed', '4',
-          '-deadline', 'realtime',
-          '-b:v', '1.8M',
-          '-auto-alt-ref', '0',
-          '-c:a', 'libopus',
-          '-b:a', '128k'
-        );
-      } else {
-        // PROXY: mesma resolução original com transparência impecável
-        args.push(
-          '-c:v', 'libvpx-vp9',
-          '-pix_fmt', 'yuva420p',
-          '-speed', '4',
-          '-deadline', 'realtime',
-          '-b:v', '3.5M',
-          '-auto-alt-ref', '0',
-          '-c:a', 'libopus',
-          '-b:a', '128k'
-        );
-      }
-    } else {
-      // Vídeo padrão sem alfa -> H.264 MP4 universalmente compatível
-      if (quality === 'lq') {
-        // LQ: máximo 1080p, CRF 26, bitrate controlado
-        args.push(
-          '-vf', "scale='min(1920,iw)':-2",
-          '-c:v', 'libx264',
-          '-preset', 'veryfast',
-          '-crf', '26',
-          '-maxrate', '2.2M',
-          '-bufsize', '4.4M',
-          '-pix_fmt', 'yuv420p',
-          '-c:a', 'aac',
-          '-b:a', '128k',
-          '-movflags', '+faststart'
-        );
-      } else {
-        // PROXY: mesma resolução original (4K permanece 4K), CRF 22, maxrate 6M
-        args.push(
-          '-c:v', 'libx264',
-          '-preset', 'veryfast',
-          '-crf', '22',
-          '-maxrate', '6M',
-          '-bufsize', '12M',
-          '-pix_fmt', 'yuv420p',
-          '-c:a', 'aac',
-          '-b:a', '192k',
-          '-movflags', '+faststart'
-        );
-      }
-    }
-
-    args.push(output);
-
-    const proc = spawn(ffmpegPath, args);
-    let errStr = '';
-    proc.stderr.on('data', d => errStr += d.toString());
-    proc.on('close', code => {
-      if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
-        resolve();
-      } else {
-        reject(new Error(`Transcode stream proxy falhou com código ${code}: ${errStr.slice(-300)}`));
-      }
-    });
-    proc.on('error', reject);
-  });
-}
-
-// Assegura versão otimizada (PROXY ou LQ) salva no Drive da conta conectada em .cloud_stream
-async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', project = null) {
-  let isAlpha = Boolean(video?.isAlpha);
-  const ext = isAlpha ? 'webm' : 'mp4';
-  const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
-  const cachePath = path.join(cacheDir, `${fileId}_${quality}.${ext}`);
-  const legacyCachePath = (quality === 'proxy') ? path.join(cacheDir, `${fileId}.${ext}`) : null;
-
+  const cachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
   if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
     return cachePath;
   }
-  if (legacyCachePath && fs.existsSync(legacyCachePath) && fs.statSync(legacyCachePath).size > 0) {
-    return legacyCachePath;
-  }
 
-  const driveKey = quality === 'lq' ? 'lqFileId' : 'proxyFileId';
-  if (video?.cloudStream && video.cloudStream[driveKey]) {
-    return { cloudDriveId: video.cloudStream[driveKey], isAlpha };
-  }
-
-  const jobKey = `${fileId}_${quality}`;
-  if (convertingWebJobs.has(jobKey)) {
-    return convertingWebJobs.get(jobKey);
+  if (convertingWebJobs.has(fileId)) {
+    return convertingWebJobs.get(fileId);
   }
 
   const job = (async () => {
-    const tempSource = path.join(uploadTempDir, `src_stream_${fileId}_${Date.now()}.mov`);
-    const tempTarget = path.join(uploadTempDir, `out_stream_${jobKey}_${Date.now()}.${ext}`);
+    const tempSource = path.join(uploadTempDir, `src_drive_${fileId}_${Date.now()}.mov`);
+    const tempTarget = path.join(uploadTempDir, `out_drive_${fileId}_${Date.now()}.mp4`);
 
     try {
       const stream = await driveApi.getFileStream(userDb, fileId);
@@ -3170,64 +3063,28 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
         stream.on('error', reject);
       });
 
-      // Detecção de transparência
-      const detectedAlpha = await probeVideoAlpha(tempSource);
-      if (detectedAlpha) {
-        isAlpha = true;
-        if (video) video.isAlpha = true;
+      const probe = await probeVideoNeedsWebTranscode(tempSource);
+      if (!probe.needsTranscode) {
+        return null;
       }
 
-      await transcodeStreamProxy({ input: tempSource, output: tempTarget, isAlpha, quality });
-
-      if (fs.existsSync(tempTarget) && fs.statSync(tempTarget).size > 0) {
+      await transcodeVideoToH264(tempSource, tempTarget);
+      if (fs.existsSync(tempTarget)) {
         fs.renameSync(tempTarget, cachePath);
-
-        // Upload assíncrono para pasta oculta .cloud_stream no Google Drive
-        (async () => {
-          try {
-            const parentFolderId = video?.driveFolderId || project?.driveFolderId || project?.folderId;
-            if (parentFolderId && userDb) {
-              const cloudStreamFolder = await driveApi.getOrCreateCloudStreamFolder(userDb, parentFolderId);
-              const streamFileName = `.stream_${fileId}_${quality}.${isAlpha ? 'webm' : 'mp4'}`;
-              const streamMime = isAlpha ? 'video/webm' : 'video/mp4';
-
-              const uploaded = await driveApi.uploadFileToFolder(
-                userDb,
-                cloudStreamFolder.id,
-                cachePath,
-                streamFileName,
-                streamMime
-              );
-
-              if (uploaded && uploaded.id) {
-                if (video) {
-                  if (!video.cloudStream) video.cloudStream = {};
-                  video.cloudStream[driveKey] = uploaded.id;
-                  if (userDb && userDb.user && userDb.user.id) {
-                    storage.saveUserDb(userDb.user.id, userDb);
-                  }
-                }
-              }
-            }
-          } catch (uploadErr) {
-            console.warn(`[CloudStream] Upload para .cloud_stream (${quality}) em segundo plano falhou:`, uploadErr.message);
-          }
-        })();
-
         return cachePath;
       }
       return null;
     } catch (err) {
-      console.error(`Erro em ensureCloudStreamProxy (${quality}):`, err.message);
+      console.error('Erro em ensureDriveWebCompatibleVideo:', err.message);
       return null;
     } finally {
       try { if (fs.existsSync(tempSource)) fs.unlinkSync(tempSource); } catch (e) {}
       try { if (fs.existsSync(tempTarget)) fs.unlinkSync(tempTarget); } catch (e) {}
-      convertingWebJobs.delete(jobKey);
+      convertingWebJobs.delete(fileId);
     }
   })();
 
-  convertingWebJobs.set(jobKey, job);
+  convertingWebJobs.set(fileId, job);
   return job;
 }
 
@@ -3564,7 +3421,11 @@ async function ensureAlphaWebm(fileId, video, userDb) {
 app.get('/api/stream/alpha-status', async (req, res) => {
   if (req.query.drive) {
     const fileId = String(req.query.drive);
-    const quality = String(req.query.quality || 'proxy').toLowerCase();
+    const cachePath = path.join(ALPHA_CACHE_DIR, `${fileId}.webm`);
+    if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+      return res.json({ ready: true, converting: false, isAlpha: true });
+    }
+
     const found = storage.findVideoByDriveId(fileId);
     if (!found) return res.status(404).json({ error: 'Vídeo não encontrado' });
 
@@ -3572,23 +3433,9 @@ app.get('/api/stream/alpha-status', async (req, res) => {
       return res.json({ ready: true, converting: false, isAlpha: false });
     }
 
-    const cachePath = path.join(ALPHA_CACHE_DIR, `${fileId}_${quality}.webm`);
-    const legacyPath = (quality === 'proxy') ? path.join(ALPHA_CACHE_DIR, `${fileId}.webm`) : null;
-
-    if ((fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) ||
-        (legacyPath && fs.existsSync(legacyPath) && fs.statSync(legacyPath).size > 0)) {
-      return res.json({ ready: true, converting: false, isAlpha: true });
-    }
-
-    const driveKey = quality === 'lq' ? 'lqFileId' : 'proxyFileId';
-    if (found.video?.cloudStream && found.video.cloudStream[driveKey]) {
-      return res.json({ ready: true, converting: false, isAlpha: true });
-    }
-
-    const jobKey = `${fileId}_${quality}`;
-    const isConverting = convertingWebJobs.has(jobKey);
+    const isConverting = convertingAlphaJobs.has(fileId);
     if (!isConverting) {
-      ensureCloudStreamProxy(fileId, found.video, found.userDb, quality, found.project).catch(err => {
+      ensureAlphaWebm(fileId, found.video, found.userDb).catch(err => {
         console.error('Erro na conversão alpha em segundo plano:', err.message);
       });
     }
@@ -3626,38 +3473,25 @@ app.get('/api/stream/alpha-status', async (req, res) => {
 app.get('/api/stream/video-status', async (req, res) => {
   if (req.query.drive) {
     const fileId = String(req.query.drive);
-    const quality = String(req.query.quality || 'proxy').toLowerCase();
+    const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
+    if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
+      return res.json({ ready: true, converting: false, needsTranscode: true });
+    }
+
     const found = storage.findVideoByDriveId(fileId);
     if (!found) return res.status(404).json({ error: 'Vídeo não encontrado' });
-
-    const isAlpha = Boolean(found.video?.isAlpha);
-    const ext = isAlpha ? 'webm' : 'mp4';
-    const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
-    const cachePath = path.join(cacheDir, `${fileId}_${quality}.${ext}`);
-    const legacyPath = (quality === 'proxy') ? path.join(cacheDir, `${fileId}.${ext}`) : null;
-
-    if ((fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) ||
-        (legacyPath && fs.existsSync(legacyPath) && fs.statSync(legacyPath).size > 0)) {
-      return res.json({ ready: true, converting: false, needsTranscode: true });
-    }
-
-    const driveKey = quality === 'lq' ? 'lqFileId' : 'proxyFileId';
-    if (found.video?.cloudStream && found.video.cloudStream[driveKey]) {
-      return res.json({ ready: true, converting: false, needsTranscode: true });
-    }
 
     const fileName = (found.video?.fileName || '').toLowerCase();
     const mime = (found.video?.mimeType || '').toLowerCase();
     const isLikelyProres = fileName.endsWith('.mov') || mime.includes('quicktime');
 
-    if (!isLikelyProres && !isAlpha && quality === 'original') {
+    if (!isLikelyProres) {
       return res.json({ ready: true, converting: false, needsTranscode: false });
     }
 
-    const jobKey = `${fileId}_${quality}`;
-    const isConverting = convertingWebJobs.has(jobKey);
+    const isConverting = convertingWebJobs.has(fileId);
     if (!isConverting) {
-      ensureCloudStreamProxy(fileId, found.video, found.userDb, quality, found.project).catch(err => {
+      ensureDriveWebCompatibleVideo(fileId, found.video, found.userDb).catch(err => {
         console.error('Erro na conversão web em segundo plano:', err.message);
       });
     }
@@ -3901,88 +3735,47 @@ app.get('/api/stream', async (req, res) => {
     }
     const isDownload = req.query.download === '1';
 
-    // DOWNLOAD: Sempre transmite o arquivo original intocado com máxima fidelidade de estúdio
-    if (isDownload) {
-      let defaultExt = '.mp4';
-      if (video) {
-        if (video.type === 'audio' || (video.mimeType && video.mimeType.startsWith('audio/'))) {
-          defaultExt = video.extension ? `.${video.extension.toLowerCase().replace('.', '')}` : '.mp3';
-        } else if (video.mimeType === 'video/quicktime' || (video.fileName && video.fileName.toLowerCase().endsWith('.mov'))) {
-          defaultExt = '.mov';
-        }
-      }
-      const streamFileName = (video && video.fileName) || `${(video && video.title) || 'arquivo'}${defaultExt}`;
-
-      return driveApi.streamFile(req, res, userDb, fileId, {
-        download: true,
-        fileName: streamFileName,
-        mimeType: video ? video.mimeType : null
-      }).catch((err) => {
-        console.error('Erro no download do drive:', err.message);
-        if (!res.headersSent) res.status(500).end();
-        else res.destroy();
-      });
-    }
-
-    // PLAYBACK QUALITIES: ORIGINAL, PROXY, LQ
-    const isAlpha = Boolean(video?.isAlpha || req.query.alpha === '1');
-    const fileName = (video?.fileName || '').toLowerCase();
-    const mime = (video?.mimeType || '').toLowerCase();
-    const isNonBrowserCodec = isAlpha || fileName.endsWith('.mov') || mime.includes('quicktime');
-
-    let quality = String(req.query.quality || '').toLowerCase();
-    if (!quality) {
-      // Requisito 1: Arquivos que antes mostravam tela de transcode reproduzem direto a versão otimizada (proxy)
-      // Requisito 2: Por padrão, demais arquivos SEMPRE exibirão a versão original
-      quality = isNonBrowserCodec ? 'proxy' : 'original';
-    }
-
-    // Modo PROXY ou LQ
-    if (quality === 'proxy' || quality === 'lq') {
-      const ext = isAlpha ? 'webm' : 'mp4';
-      const contentType = isAlpha ? 'video/webm' : 'video/mp4';
-      const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
-      const cachePath = path.join(cacheDir, `${fileId}_${quality}.${ext}`);
-      const legacyPath = (quality === 'proxy') ? path.join(cacheDir, `${fileId}.${ext}`) : null;
-
-      // 1. Verifica cache local do servidor
+    // Se o vídeo é alpha e NÃO é download, serve a versão WebM transparente nativa
+    if (video && video.isAlpha && !isDownload) {
+      const cachePath = path.join(ALPHA_CACHE_DIR, `${fileId}.webm`);
       if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
-        return streamLocalRangeFile(req, res, cachePath, contentType);
-      }
-      if (legacyPath && fs.existsSync(legacyPath) && fs.statSync(legacyPath).size > 0) {
-        return streamLocalRangeFile(req, res, legacyPath, contentType);
+        return streamLocalRangeFile(req, res, cachePath, 'video/webm');
       }
 
-      // 2. Verifica se já está hospedado no Google Drive em .cloud_stream
-      const cloudFileId = quality === 'lq' ? video?.cloudStream?.lqFileId : video?.cloudStream?.proxyFileId;
-      if (cloudFileId) {
-        return driveApi.streamFile(req, res, userDb, cloudFileId, {
-          download: false,
-          fileName: `stream_${quality}.${ext}`,
-          mimeType: contentType
-        }).catch(err => {
-          console.warn('[Stream] Falha no stream do Drive .cloud_stream, tentando gerar:', err.message);
-        });
-      }
-
-      // 3. Se ainda não existe, gera imediatamente o arquivo otimizado e salva em .cloud_stream
+      // Se ainda não está pronto, aguarda a geração e serve
       try {
-        const readyPath = await ensureCloudStreamProxy(fileId, video, userDb, quality, project);
-        if (readyPath && typeof readyPath === 'string' && fs.existsSync(readyPath) && fs.statSync(readyPath).size > 0) {
-          return streamLocalRangeFile(req, res, readyPath, contentType);
-        } else if (readyPath && readyPath.cloudDriveId) {
-          return driveApi.streamFile(req, res, userDb, readyPath.cloudDriveId, {
-            download: false,
-            fileName: `stream_${quality}.${ext}`,
-            mimeType: contentType
-          });
+        const result = await ensureAlphaWebm(fileId, video, userDb);
+        if (result && fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+          return streamLocalRangeFile(req, res, cachePath, 'video/webm');
         }
       } catch (err) {
-        console.error(`Falha ao gerar versão ${quality}:`, err.message);
+        console.error('Falha ao processar vídeo alpha, usando stream original:', err.message);
       }
     }
 
-    // Modo ORIGINAL (para arquivos web padrão)
+    // Se NÃO é download, verifica se há versão transcodificada compatível (ProRes / DNxHD)
+    if (!isDownload) {
+      const webCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
+      if (fs.existsSync(webCachePath) && fs.statSync(webCachePath).size > 0) {
+        return streamLocalRangeFile(req, res, webCachePath, 'video/mp4');
+      }
+
+      const fileName = (video?.fileName || '').toLowerCase();
+      const mime = (video?.mimeType || '').toLowerCase();
+      const isLikelyProres = fileName.endsWith('.mov') || mime.includes('quicktime');
+
+      if (isLikelyProres) {
+        try {
+          const readyWebPath = await ensureDriveWebCompatibleVideo(fileId, video, userDb);
+          if (readyWebPath && fs.existsSync(readyWebPath) && fs.statSync(readyWebPath).size > 0) {
+            return streamLocalRangeFile(req, res, readyWebPath, 'video/mp4');
+          }
+        } catch (err) {
+          console.error('Falha ao converter ProRes drive:', err.message);
+        }
+      }
+    }
+
     let defaultExt = '.mp4';
     if (video) {
       if (video.type === 'audio' || (video.mimeType && video.mimeType.startsWith('audio/'))) {
@@ -3994,7 +3787,7 @@ app.get('/api/stream', async (req, res) => {
     const streamFileName = (video && video.fileName) || `${(video && video.title) || 'arquivo'}${defaultExt}`;
 
     return driveApi.streamFile(req, res, userDb, fileId, {
-      download: false,
+      download: isDownload,
       fileName: streamFileName,
       mimeType: video ? video.mimeType : null
     }).catch((err) => {

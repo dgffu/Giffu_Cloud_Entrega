@@ -3048,86 +3048,126 @@ async function ensureDriveWebCompatibleVideo(fileId, video, userDb) {
 }
 
 // Transcodificador otimizado para reprodução web (PROXY e LQ)
-// Garante o equilíbrio perfeito entre qualidade visual, suporte total a codecs/alpha e economia de espaço no Drive
+// Dimensionamento real de Proxy (1080p para PROXY e 720p para LQ) com aceleração por hardware (VideoToolbox no Mac)
 function transcodeStreamProxy({ input, output, isAlpha, quality }) {
   let ffmpegPath = 'ffmpeg';
   try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
 
-  return new Promise((resolve, reject) => {
-    let args = ['-y', '-i', input, '-map', '0:v:0', '-map', '0:a?'];
+  const isMac = process.platform === 'darwin';
 
-    if (isAlpha) {
-      // Vídeo com transparência (Alpha) -> WebM VP9 com canal alfa (yuva420p)
-      if (quality === 'lq') {
-        args.push(
-          '-vf', "scale='min(1920,iw)':-2",
-          '-c:v', 'libvpx-vp9',
-          '-pix_fmt', 'yuva420p',
-          '-speed', '4',
-          '-deadline', 'realtime',
-          '-b:v', '1.8M',
-          '-auto-alt-ref', '0',
-          '-c:a', 'libopus',
-          '-b:a', '128k'
-        );
-      } else {
-        // PROXY: mesma resolução original com transparência impecável
-        args.push(
-          '-c:v', 'libvpx-vp9',
-          '-pix_fmt', 'yuva420p',
-          '-speed', '4',
-          '-deadline', 'realtime',
-          '-b:v', '3.5M',
-          '-auto-alt-ref', '0',
-          '-c:a', 'libopus',
-          '-b:a', '128k'
-        );
-      }
-    } else {
-      // Vídeo padrão sem alfa -> H.264 MP4 universalmente compatível
-      if (quality === 'lq') {
-        // LQ: máximo 1080p, CRF 26, bitrate controlado
-        args.push(
-          '-vf', "scale='min(1920,iw)':-2",
-          '-c:v', 'libx264',
-          '-preset', 'veryfast',
-          '-crf', '26',
-          '-maxrate', '2.2M',
-          '-bufsize', '4.4M',
-          '-pix_fmt', 'yuv420p',
-          '-c:a', 'aac',
-          '-b:a', '128k',
-          '-movflags', '+faststart'
-        );
-      } else {
-        // PROXY: mesma resolução original (4K permanece 4K), CRF 22, maxrate 6M
-        args.push(
-          '-c:v', 'libx264',
-          '-preset', 'veryfast',
-          '-crf', '22',
-          '-maxrate', '6M',
-          '-bufsize', '12M',
-          '-pix_fmt', 'yuv420p',
-          '-c:a', 'aac',
-          '-b:a', '192k',
-          '-movflags', '+faststart'
-        );
-      }
-    }
+  const runEncoder = (useHardware = isMac && !isAlpha) => {
+    return new Promise((resolve, reject) => {
+      let args = ['-y', '-i', input, '-map', '0:v:0', '-map', '0:a?'];
 
-    args.push(output);
-
-    const proc = spawn(ffmpegPath, args);
-    let errStr = '';
-    proc.stderr.on('data', d => errStr += d.toString());
-    proc.on('close', code => {
-      if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
-        resolve();
+      if (isAlpha) {
+        // Vídeo com transparência (Alpha) -> WebM VP9 com canal alfa (yuva420p)
+        if (quality === 'lq') {
+          args.push(
+            '-vf', "scale='min(1280,iw)':-2",
+            '-c:v', 'libvpx-vp9',
+            '-pix_fmt', 'yuva420p',
+            '-speed', '8',
+            '-deadline', 'realtime',
+            '-b:v', '1.2M',
+            '-auto-alt-ref', '0',
+            '-c:a', 'libopus',
+            '-b:a', '128k'
+          );
+        } else {
+          // PROXY: 1080p web-ready com transparência impecável
+          args.push(
+            '-vf', "scale='min(1920,iw)':-2",
+            '-c:v', 'libvpx-vp9',
+            '-pix_fmt', 'yuva420p',
+            '-speed', '8',
+            '-deadline', 'realtime',
+            '-b:v', '2.5M',
+            '-auto-alt-ref', '0',
+            '-c:a', 'libopus',
+            '-b:a', '128k'
+          );
+        }
       } else {
-        reject(new Error(`Transcode stream proxy falhou com código ${code}: ${errStr.slice(-300)}`));
+        // Vídeo padrão sem alfa -> H.264 MP4 universalmente compatível
+        if (quality === 'lq') {
+          // LQ: 720p otimizado, ultra-rápido e ultraleve
+          args.push('-vf', "scale='min(1280,iw)':-2");
+          if (useHardware) {
+            args.push(
+              '-c:v', 'h264_videotoolbox',
+              '-b:v', '1500k',
+              '-prio_speed', '1',
+              '-realtime', '1',
+              '-pix_fmt', 'yuv420p',
+              '-c:a', 'aac',
+              '-b:a', '128k',
+              '-movflags', '+faststart'
+            );
+          } else {
+            args.push(
+              '-c:v', 'libx264',
+              '-preset', 'ultrafast',
+              '-crf', '27',
+              '-maxrate', '1.8M',
+              '-bufsize', '3.6M',
+              '-pix_fmt', 'yuv420p',
+              '-c:a', 'aac',
+              '-b:a', '128k',
+              '-movflags', '+faststart'
+            );
+          }
+        } else {
+          // PROXY: Dimensionamento real de 1080p (como Frame.io e YouTube)
+          args.push('-vf', "scale='min(1920,iw)':-2");
+          if (useHardware) {
+            args.push(
+              '-c:v', 'h264_videotoolbox',
+              '-b:v', '3500k',
+              '-prio_speed', '1',
+              '-realtime', '1',
+              '-pix_fmt', 'yuv420p',
+              '-c:a', 'aac',
+              '-b:a', '192k',
+              '-movflags', '+faststart'
+            );
+          } else {
+            args.push(
+              '-c:v', 'libx264',
+              '-preset', 'superfast',
+              '-crf', '23',
+              '-maxrate', '4.5M',
+              '-bufsize', '9M',
+              '-pix_fmt', 'yuv420p',
+              '-c:a', 'aac',
+              '-b:a', '192k',
+              '-movflags', '+faststart'
+            );
+          }
+        }
       }
+
+      args.push(output);
+
+      const proc = spawn(ffmpegPath, args);
+      let errStr = '';
+      proc.stderr.on('data', d => errStr += d.toString());
+      proc.on('close', code => {
+        if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
+          resolve();
+        } else {
+          reject(new Error(`Transcode falhou (código ${code}): ${errStr.slice(-300)}`));
+        }
+      });
+      proc.on('error', reject);
     });
-    proc.on('error', reject);
+  };
+
+  return runEncoder(isMac && !isAlpha).catch(err => {
+    if (isMac && !isAlpha) {
+      console.warn('[VideoTranscode] Hardware VideoToolbox falhou, aplicando fallback software:', err.message);
+      return runEncoder(false);
+    }
+    throw err;
   });
 }
 
@@ -3159,25 +3199,32 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
   const job = (async () => {
     const tempSource = path.join(uploadTempDir, `src_stream_${fileId}_${Date.now()}.mov`);
     const tempTarget = path.join(uploadTempDir, `out_stream_${jobKey}_${Date.now()}.${ext}`);
+    let needCleanupTemp = false;
 
     try {
-      const stream = await driveApi.getFileStream(userDb, fileId);
-      const ws = fs.createWriteStream(tempSource);
-      stream.pipe(ws);
-      await new Promise((resolve, reject) => {
-        ws.on('finish', resolve);
-        ws.on('error', reject);
-        stream.on('error', reject);
-      });
+      let sourcePath = tempSource;
+      if (video?.localPath && fs.existsSync(video.localPath)) {
+        sourcePath = video.localPath;
+      } else {
+        needCleanupTemp = true;
+        const stream = await driveApi.getFileStream(userDb, fileId);
+        const ws = fs.createWriteStream(tempSource);
+        stream.pipe(ws);
+        await new Promise((resolve, reject) => {
+          ws.on('finish', resolve);
+          ws.on('error', reject);
+          stream.on('error', reject);
+        });
+      }
 
       // Detecção de transparência
-      const detectedAlpha = await probeVideoAlpha(tempSource);
+      const detectedAlpha = await probeVideoAlpha(sourcePath);
       if (detectedAlpha) {
         isAlpha = true;
         if (video) video.isAlpha = true;
       }
 
-      await transcodeStreamProxy({ input: tempSource, output: tempTarget, isAlpha, quality });
+      await transcodeStreamProxy({ input: sourcePath, output: tempTarget, isAlpha, quality });
 
       if (fs.existsSync(tempTarget) && fs.statSync(tempTarget).size > 0) {
         fs.renameSync(tempTarget, cachePath);
@@ -3187,9 +3234,9 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
           try {
             const parentFolderId = video?.driveFolderId || project?.driveFolderId || project?.folderId;
             if (parentFolderId && userDb) {
-              const cloudStreamFolder = await driveApi.getOrCreateCloudStreamFolder(userDb, parentFolderId);
               const streamFileName = `.stream_${fileId}_${quality}.${isAlpha ? 'webm' : 'mp4'}`;
               const streamMime = isAlpha ? 'video/webm' : 'video/mp4';
+              const cloudStreamFolder = await driveApi.getOrCreateCloudStreamFolder(userDb, parentFolderId);
 
               const uploaded = await driveApi.uploadFileToFolder(
                 userDb,
@@ -3221,7 +3268,9 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
       console.error(`Erro em ensureCloudStreamProxy (${quality}):`, err.message);
       return null;
     } finally {
-      try { if (fs.existsSync(tempSource)) fs.unlinkSync(tempSource); } catch (e) {}
+      if (needCleanupTemp) {
+        try { if (fs.existsSync(tempSource)) fs.unlinkSync(tempSource); } catch (e) {}
+      }
       try { if (fs.existsSync(tempTarget)) fs.unlinkSync(tempTarget); } catch (e) {}
       convertingWebJobs.delete(jobKey);
     }

@@ -37,6 +37,7 @@ class CustomVideoPlayer {
     this.alphaBgMode = this.isAlpha ? 'checkerboard' : 'black';
     this._userMutedIntentionally = false;
     this.audioHealthTimer = null;
+    this.activeCastDevice = null;
 
     this.init();
   }
@@ -416,6 +417,19 @@ class CustomVideoPlayer {
   }
 
   togglePlay() {
+    if (this.activeCastDevice) {
+      const action = this.isPlaying ? 'pause' : 'resume';
+      this.isPlaying = !this.isPlaying;
+      fetch('/api/cast/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: this.activeCastDevice.id, action })
+      }).catch(e => console.warn('[Cast] Erro togglePlay:', e));
+      if (this.playIcon) {
+        this.playIcon.innerHTML = this.isPlaying ? '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
+      }
+      return;
+    }
     if (this.video.ended) {
       this.video.currentTime = 0;
       this.play();
@@ -554,7 +568,15 @@ class CustomVideoPlayer {
 
   seekTo(seconds) {
     if (!this.video) return;
-    this.video.currentTime = Math.max(0, Math.min(seconds, this.video.duration || 0));
+    const target = Math.max(0, Math.min(seconds, this.video.duration || 0));
+    this.video.currentTime = target;
+    if (this.activeCastDevice) {
+      fetch('/api/cast/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: this.activeCastDevice.id, action: 'seek', value: target })
+      }).catch(e => console.warn('[Cast] Erro seek:', e));
+    }
   }
 
   stepFrame(direction) {
@@ -1703,67 +1725,238 @@ class CustomVideoPlayer {
   }
 
   async triggerCast() {
-    const rawSrc = this.video.currentSrc || this.video.src || this.videoData.url;
-    // Resolve absolute URL so remote smart TVs / chromecasts can fetch directly across LAN/WAN
-    const absoluteUrl = new URL(rawSrc, window.location.href).href;
+    await this.openCastPickerModal();
+  }
 
-    // 1. Google Cast SDK (Chromecast, Google TV, Android TV)
-    if (window.cast && window.cast.framework) {
-      try {
-        const castContext = window.cast.framework.CastContext.getInstance();
-        const castState = castContext.getCastState();
-        if (castState !== cast.framework.CastState.NO_DEVICES_AVAILABLE) {
-          await castContext.requestSession();
-          const session = castContext.getCurrentSession();
-          if (session) {
-            const mime = this.isMov ? 'video/quicktime' : 'video/mp4';
-            const mediaInfo = new chrome.cast.media.MediaInfo(absoluteUrl, mime);
-            mediaInfo.streamType = chrome.cast.media.StreamType.BUFFERED;
-            mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
-            mediaInfo.metadata.title = this.videoData.title || this.videoData.fileName || 'Vídeo';
+  async openCastPickerModal() {
+    const existing = document.getElementById('castModalBackdrop');
+    if (existing) existing.remove();
 
-            const req = new chrome.cast.media.LoadRequest(mediaInfo);
-            req.autoplay = !this.video.paused;
-            req.currentTime = this.video.currentTime || 0;
-            await session.loadMedia(req);
-            return;
-          }
-        }
-      } catch (err) {
-        if (err !== 'cancel' && err?.code !== 'cancel') {
-          console.warn('[Cast] Cast SDK session request fallback:', err);
-        } else {
-          return; // User cancelled dialog
-        }
-      }
+    const backdrop = document.createElement('div');
+    backdrop.id = 'castModalBackdrop';
+    backdrop.className = 'cast-modal-backdrop';
+
+    const hasAirPlay = (this.video && typeof this.video.webkitShowPlaybackTargetPicker === 'function');
+
+    backdrop.innerHTML = `
+      <div class="cast-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="castModalTitle">
+        <div class="cast-modal-header">
+          <div class="cast-modal-title-row">
+            <svg viewBox="0 0 24 24"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+            <span class="cast-modal-title" id="castModalTitle">Transmitir Vídeo</span>
+          </div>
+          <button class="cast-modal-close-btn" id="castModalCloseBtn" aria-label="Fechar">
+            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+        <div class="cast-modal-body">
+          ${this.activeCastDevice ? `
+            <div class="cast-active-box">
+              <div class="cast-active-text">
+                <span class="cast-pulse-dot"></span>
+                <span>Transmitindo para <strong>${this.activeCastDevice.name || 'Smart TV'}</strong></span>
+              </div>
+              <button class="cast-btn-disconnect" id="castBtnDisconnect">Desconectar</button>
+            </div>
+          ` : ''}
+
+          <div class="cast-modal-subtitle">Selecione o dispositivo na sua rede local para transmitir o vídeo diretamente:</div>
+
+          <div class="cast-section-label">Smart TVs & Chromecast</div>
+          <div class="cast-device-list" id="castSmartTvList">
+            <div class="cast-loading-row">
+              <span class="cast-spinner"></span>
+              <span>Buscando Smart TVs e Chromecasts na rede...</span>
+            </div>
+          </div>
+
+          ${hasAirPlay ? `
+            <div class="cast-section-label">Dispositivos Apple</div>
+            <div class="cast-device-list">
+              <button class="cast-device-card" id="btnAirPlayOption">
+                <div class="cast-device-icon-wrap airplay-wrap">
+                  <svg viewBox="0 0 24 24"><path d="M6 22h12l-6-6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+                </div>
+                <div class="cast-device-details">
+                  <div class="cast-device-title">Apple AirPlay</div>
+                  <div class="cast-device-sub">Apple TV ou Smart TV compatível com AirPlay 2</div>
+                </div>
+                <span class="cast-device-action-badge">Abrir</span>
+              </button>
+            </div>
+          ` : ''}
+
+          <div class="cast-manual-ip-box">
+            <button class="cast-manual-toggle" id="btnToggleManualIp">
+              <span>+ Conectar diretamente por IP (ex: 192.168.0.X)</span>
+            </button>
+            <div class="cast-manual-form" id="castManualForm" style="display: none;">
+              <input type="text" class="cast-manual-input" id="castManualIpInput" placeholder="Ex: 192.168.0.2">
+              <button class="cast-manual-btn" id="castManualConnectBtn">Conectar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(backdrop);
+
+    const closeModal = () => {
+      backdrop.remove();
+    };
+
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) closeModal();
+    });
+
+    const closeBtn = backdrop.querySelector('#castModalCloseBtn');
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+
+    // Disconnect button
+    const btnDisconnect = backdrop.querySelector('#castBtnDisconnect');
+    if (btnDisconnect && this.activeCastDevice) {
+      btnDisconnect.addEventListener('click', async () => {
+        try {
+          await fetch('/api/cast/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deviceId: this.activeCastDevice.id, action: 'stop' })
+          });
+        } catch (e) {}
+        this.activeCastDevice = null;
+        this.btnCast.classList.remove('is-connected');
+        this.btnCast.title = 'Transmitir vídeo para Smart TV ou Chromecast';
+        closeModal();
+      });
     }
 
-    // 2. W3C Remote Playback API (Chrome, Edge, Samsung Internet -> Smart TVs & Cast devices)
-    if (this.video && this.video.remote && typeof this.video.remote.prompt === 'function') {
-      try {
-        await this.video.remote.prompt();
-        return;
-      } catch (err) {
-        if (err.name !== 'NotFoundError' && err.name !== 'NotAllowedError') {
-          console.warn('[Cast] Remote Playback API prompt error:', err);
-        } else {
-          return; // User cancelled
+    // AirPlay click handler
+    const btnAirPlay = backdrop.querySelector('#btnAirPlayOption');
+    if (btnAirPlay) {
+      btnAirPlay.addEventListener('click', () => {
+        closeModal();
+        try {
+          this.video.webkitShowPlaybackTargetPicker();
+        } catch (e) {
+          console.warn('[Cast] Erro ao abrir seletor AirPlay:', e);
         }
-      }
+      });
     }
 
-    // 3. Apple AirPlay (Safari macOS / iOS -> Apple TV & AirPlay 2 Smart TVs)
-    if (this.video && typeof this.video.webkitShowPlaybackTargetPicker === 'function') {
+    // Manual IP toggle
+    const toggleManualIp = backdrop.querySelector('#btnToggleManualIp');
+    const manualForm = backdrop.querySelector('#castManualForm');
+    const manualInput = backdrop.querySelector('#castManualIpInput');
+    const manualBtn = backdrop.querySelector('#castManualConnectBtn');
+    if (toggleManualIp && manualForm) {
+      toggleManualIp.addEventListener('click', () => {
+        const isHidden = manualForm.style.display === 'none';
+        manualForm.style.display = isHidden ? 'flex' : 'none';
+        if (isHidden) manualInput.focus();
+      });
+
+      manualBtn.addEventListener('click', async () => {
+        const ip = manualInput.value.trim();
+        if (!ip) return;
+        manualBtn.disabled = true;
+        manualBtn.textContent = 'Conectando...';
+        await this.connectToCastDevice({ host: ip, name: `Smart TV (${ip})` });
+        closeModal();
+      });
+    }
+
+    // Load devices from server
+    const listContainer = backdrop.querySelector('#castSmartTvList');
+    try {
+      const res = await fetch('/api/cast/devices');
+      const data = await res.json();
+      const devices = (data && data.devices) || [];
+
+      if (!listContainer) return;
+
+      if (devices.length === 0) {
+        listContainer.innerHTML = `
+          <div style="font-size: 0.85rem; color: rgba(255,255,255,0.45); padding: 8px 4px;">
+            Nenhum Chromecast ou Google TV detectado nesta rede automaticamente.
+            <div style="margin-top: 6px;">Verifique se o dispositivo está no mesmo Wi-Fi, ou conecte por IP abaixo.</div>
+          </div>
+        `;
+      } else {
+        listContainer.innerHTML = '';
+        devices.forEach((dev) => {
+          const card = document.createElement('button');
+          card.className = `cast-device-card ${this.activeCastDevice?.id === dev.id ? 'is-active' : ''}`;
+          card.innerHTML = `
+            <div class="cast-device-icon-wrap">
+              <svg viewBox="0 0 24 24"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+            </div>
+            <div class="cast-device-details">
+              <div class="cast-device-title">${dev.name || 'Chromecast'}</div>
+              <div class="cast-device-sub">Google TV / Chromecast (${dev.host})</div>
+            </div>
+            <span class="cast-device-action-badge">${this.activeCastDevice?.id === dev.id ? 'Conectado' : 'Conectar'}</span>
+          `;
+          card.addEventListener('click', async () => {
+            const badge = card.querySelector('.cast-device-action-badge');
+            if (badge) badge.textContent = 'Conectando...';
+            card.disabled = true;
+            await this.connectToCastDevice(dev);
+            closeModal();
+          });
+          listContainer.appendChild(card);
+        });
+      }
+    } catch (err) {
+      if (listContainer) {
+        listContainer.innerHTML = `
+          <div style="font-size: 0.85rem; color: #f87171; padding: 6px 0;">
+            Erro ao listar dispositivos na rede local.
+          </div>
+        `;
+      }
+    }
+  }
+
+  async connectToCastDevice(dev) {
+    try {
+      this.btnCast.classList.add('is-connecting');
+      this.btnCast.classList.remove('is-connected');
+
+      const rawSrc = this.video.currentSrc || this.video.src || this.videoData.url;
+      const res = await fetch('/api/cast/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId: dev.id,
+          host: dev.host,
+          mediaUrl: rawSrc,
+          startTime: this.video.currentTime || 0,
+          title: this.videoData.title || this.videoData.fileName || 'Vídeo'
+        })
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Falha ao conectar ao dispositivo');
+      }
+
+      this.activeCastDevice = dev;
+      this.btnCast.classList.remove('is-connecting');
+      this.btnCast.classList.add('is-connected');
+      this.btnCast.title = `Transmitindo para ${dev.name || 'Smart TV'}`;
+
+      // Pause local playback so audio does not echo
       try {
-        this.video.webkitShowPlaybackTargetPicker();
-        return;
-      } catch (err) {
-        console.warn('[Cast] WebKit AirPlay picker error:', err);
-      }
-    }
+        this.video.pause();
+      } catch (e) {}
 
-    // 4. Fallback alert if no API supported or no device detected
-    alert('Nenhum dispositivo compatível encontrado ou seu navegador não suporta streaming direto para Smart TV / Chromecast.');
+      console.log(`[Cast] Transmissão iniciada em: ${dev.name}`);
+    } catch (err) {
+      console.error('[Cast] Erro ao transmitir:', err);
+      this.btnCast.classList.remove('is-connecting');
+      this.btnCast.classList.remove('is-connected');
+      alert(`Não foi possível iniciar a transmissão para ${dev.name || dev.host}: ${err.message}`);
+    }
   }
 
   captureCurrentFrame() {

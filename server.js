@@ -324,7 +324,32 @@ function isScopeAuthorized(req, scope, ownerUserId, ownerDb) {
   return false;
 }
 
+// Temporary tokens for Chromecast/Smart TV playback
+const castTokens = new Map();
+
+function generateCastToken(fileId = 'media') {
+  const token = crypto.randomBytes(16).toString('hex');
+  castTokens.set(token, {
+    fileId: String(fileId),
+    expiry: Date.now() + 6 * 3600 * 1000 // 6 hours
+  });
+  return token;
+}
+
+function isValidCastToken(token) {
+  if (!token || !castTokens.has(token)) return false;
+  const item = castTokens.get(token);
+  if (Date.now() > item.expiry) {
+    castTokens.delete(token);
+    return false;
+  }
+  return true;
+}
+
 function isProjectAccessAuthorized(req, project, ownerUserId, ownerDb) {
+  if (req && req.query && req.query.castToken && isValidCastToken(req.query.castToken)) {
+    return true;
+  }
   if (!project) return false;
   const pwd = project.password ? String(project.password).trim() : '';
   if (!pwd) return true;
@@ -4413,7 +4438,8 @@ app.get('/api/stream', async (req, res) => {
   }));
 
   const isAllowed = isUnder(resolvedFilePath, path.join(__dirname, 'public', 'assets')) ||
-    registered.has(resolvedFilePath);
+    registered.has(resolvedFilePath) ||
+    Boolean(req.query.castToken && isValidCastToken(req.query.castToken));
   if (!isAllowed) {
     return res.status(403).send('Acesso não autorizado');
   }
@@ -4552,6 +4578,191 @@ app.post('/api/settings', requireAuthor, (req, res) => {
   userDb.settings = { ...(userDb.settings || {}), ...updates };
   storage.saveUserDb(req.user.id, userDb);
   res.json(userDb.settings);
+});
+
+// ==========================================
+// CHROMECAST & SMART TV NETWORK CONTROLLER
+// ==========================================
+let chromecastClient = null;
+const discoveredCastDevices = new Map();
+
+function initChromecastManager() {
+  try {
+    const ChromecastAPI = require('chromecast-api');
+    chromecastClient = new ChromecastAPI();
+
+    chromecastClient.on('device', (device) => {
+      const id = device.name || device.host;
+      const friendlyName = device.friendlyName || device.name || 'Dispositivo Cast';
+      console.log(`[Cast] Dispositivo detectado na rede: "${friendlyName}" (${device.host})`);
+      discoveredCastDevices.set(id, {
+        id,
+        name: friendlyName,
+        host: device.host,
+        deviceInstance: device,
+        lastSeen: Date.now()
+      });
+    });
+
+    console.log('[Cast] Gerenciador Chromecast/Google TV ativo para detecção em rede.');
+  } catch (err) {
+    console.warn('[Cast] Não foi possível iniciar detecção de Chromecast:', err.message);
+  }
+}
+
+app.get('/api/cast/devices', (req, res) => {
+  if (chromecastClient && typeof chromecastClient.update === 'function') {
+    try { chromecastClient.update(); } catch (e) {}
+  }
+  const devices = [];
+  for (const dev of discoveredCastDevices.values()) {
+    devices.push({
+      id: dev.id,
+      name: dev.name,
+      host: dev.host,
+      type: 'chromecast'
+    });
+  }
+  res.json({ success: true, devices });
+});
+
+app.post('/api/cast/play', async (req, res) => {
+  const { deviceId, host, mediaUrl, startTime, title } = req.body || {};
+  let dev = discoveredCastDevices.get(deviceId);
+
+  if (!dev && host) {
+    for (const d of discoveredCastDevices.values()) {
+      if (d.host === host) {
+        dev = d;
+        break;
+      }
+    }
+  }
+
+  if (!dev && host) {
+    try {
+      const Device = require('chromecast-api/lib/device');
+      const manualDevice = new Device({
+        name: `Chromecast-${host}`,
+        friendlyName: `Smart TV (${host})`,
+        host: host
+      });
+      dev = {
+        id: `Chromecast-${host}`,
+        name: manualDevice.friendlyName,
+        host: host,
+        deviceInstance: manualDevice,
+        lastSeen: Date.now()
+      };
+      discoveredCastDevices.set(dev.id, dev);
+    } catch (e) {
+      return res.status(400).json({ success: false, error: 'Não foi possível instanciar dispositivo por IP' });
+    }
+  }
+
+  if (!dev || !dev.deviceInstance) {
+    return res.status(404).json({ success: false, error: 'Dispositivo Cast não encontrado' });
+  }
+
+  if (!mediaUrl) {
+    return res.status(400).json({ success: false, error: 'URL do vídeo é obrigatória' });
+  }
+
+  const lanIp = getLanIp();
+  const lanBase = `http://${lanIp}:${PORT}`;
+  let finalMediaUrl = mediaUrl;
+
+  if (finalMediaUrl.startsWith('/')) {
+    finalMediaUrl = `${lanBase}${finalMediaUrl}`;
+  } else if (finalMediaUrl.includes('localhost:') || finalMediaUrl.includes('127.0.0.1:')) {
+    finalMediaUrl = finalMediaUrl.replace(/localhost:\d+/, `${lanIp}:${PORT}`).replace(/127\.0\.0\.1:\d+/, `${lanIp}:${PORT}`);
+  }
+
+  const castToken = generateCastToken(dev.id);
+  const delim = finalMediaUrl.includes('?') ? '&' : '?';
+  finalMediaUrl = `${finalMediaUrl}${delim}castToken=${castToken}`;
+
+  console.log(`[Cast] Transmitindo para "${dev.name}" (${dev.host}): ${finalMediaUrl}`);
+
+  dev.deviceInstance.play(finalMediaUrl, {
+    startTime: Number(startTime) || 0,
+    title: title || 'Giffú Video'
+  }, (err) => {
+    if (err) {
+      console.error('[Cast] Erro ao reproduzir:', err.message);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+    res.json({
+      success: true,
+      deviceId: dev.id,
+      name: dev.name,
+      status: 'playing'
+    });
+  });
+});
+
+app.post('/api/cast/control', (req, res) => {
+  const { deviceId, action, value } = req.body || {};
+  const dev = discoveredCastDevices.get(deviceId);
+  if (!dev || !dev.deviceInstance) {
+    return res.status(404).json({ success: false, error: 'Dispositivo Cast não encontrado' });
+  }
+
+  const inst = dev.deviceInstance;
+  try {
+    switch (action) {
+      case 'pause':
+        inst.pause((err) => {
+          if (err) return res.status(500).json({ success: false, error: err.message });
+          res.json({ success: true, action: 'pause' });
+        });
+        break;
+      case 'resume':
+      case 'play':
+        inst.resume((err) => {
+          if (err) return res.status(500).json({ success: false, error: err.message });
+          res.json({ success: true, action: 'resume' });
+        });
+        break;
+      case 'seek':
+        inst.seek(Number(value) || 0, (err) => {
+          if (err) return res.status(500).json({ success: false, error: err.message });
+          res.json({ success: true, action: 'seek', value });
+        });
+        break;
+      case 'volume':
+        inst.setVolume(Number(value) || 1, (err) => {
+          if (err) return res.status(500).json({ success: false, error: err.message });
+          res.json({ success: true, action: 'volume', value });
+        });
+        break;
+      case 'stop':
+        inst.stop((err) => {
+          if (err) return res.status(500).json({ success: false, error: err.message });
+          res.json({ success: true, action: 'stop' });
+        });
+        break;
+      default:
+        res.status(400).json({ success: false, error: 'Ação de controle desconhecida' });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/cast/status', (req, res) => {
+  const { deviceId } = req.query;
+  const dev = discoveredCastDevices.get(deviceId);
+  if (!dev || !dev.deviceInstance) {
+    return res.status(404).json({ success: false, error: 'Dispositivo não encontrado' });
+  }
+
+  dev.deviceInstance.getStatus((err, status) => {
+    if (err) {
+      return res.json({ success: true, isConnected: false, playerState: 'IDLE' });
+    }
+    res.json({ success: true, isConnected: true, status });
+  });
 });
 
 function sendHtmlWithTitle(reqOrRes, resOrTitle, pageTitle, hideBrand = true, authorName = 'Giffú', authorColor = '#FF5400', ogImageUrl = null) {
@@ -4816,6 +5027,8 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`📱 Rede LAN:     http://${lanIp}:${PORT}`);
   console.log(`📁 Modo Autor:   http://${lanIp}:${PORT}/author`);
   console.log(`======================================================\n`);
+
+  initChromecastManager();
 });
 
 server.on('error', (err) => {

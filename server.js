@@ -3083,83 +3083,9 @@ async function ensureDriveWebCompatibleVideo(fileId, video, userDb) {
   return ensureCloudStreamProxy(fileId, video, userDb, 'proxy');
 }
 
-// Helper para sondar metadados, canais e proporções do vídeo com timeout de segurança
-function probeVideoInfo(filePath) {
-  return new Promise((resolve) => {
-    let ffmpegPath = 'ffmpeg';
-    try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
-    const proc = spawn(ffmpegPath, ['-i', filePath]);
-    let errStr = '';
-    const timer = setTimeout(() => {
-      try { proc.kill(); } catch (e) {}
-      resolve({ width: 0, height: 0, durationSec: 0, hasAlpha: false, isVertical: false });
-    }, 8000);
-
-    proc.stderr.on('data', d => errStr += d.toString());
-    proc.on('close', () => {
-      clearTimeout(timer);
-      const resMatch = errStr.match(/Stream #\d+:\d+.*?: Video:.*? (\d{2,5})x(\d{2,5})/);
-      const durMatch = errStr.match(/Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)/);
-      const hasAlpha = /yuva|rgba|argb|bgra|abgr|ya8|ap4h|ap4x|qtrle/i.test(errStr);
-      const width = resMatch ? parseInt(resMatch[1], 10) : 0;
-      const height = resMatch ? parseInt(resMatch[2], 10) : 0;
-      let durationSec = 0;
-      if (durMatch) {
-        durationSec = parseFloat(durMatch[1]) * 3600 + parseFloat(durMatch[2]) * 60 + parseFloat(durMatch[3]);
-      }
-      resolve({
-        width,
-        height,
-        durationSec,
-        hasAlpha,
-        isVertical: height > width
-      });
-    });
-    proc.on('error', () => {
-      clearTimeout(timer);
-      resolve({ width: 0, height: 0, durationSec: 0, hasAlpha: false, isVertical: false });
-    });
-  });
-}
-
-function probeVideoAlpha(filePath) {
-  return probeVideoInfo(filePath).then(info => info.hasAlpha);
-}
-
-// Salva de forma atômica e segura o ID do .cloud_stream no banco recarregado (evita sobrescrever dados)
-function persistCloudStreamId(userDb, project, video, driveKey, uploadedId, isAlpha) {
-  try {
-    const userId = (userDb && userDb.user && userDb.user.id) || (userDb && userDb.id) || (project && project.userId);
-    if (!userId) return;
-    const freshDb = storage.getUserDb(userId);
-    if (!freshDb || !Array.isArray(freshDb.projects)) return;
-    const pId = project ? project.id : null;
-    const vId = video ? (video.id || video.driveFileId) : null;
-    let modified = false;
-
-    for (const p of freshDb.projects) {
-      if (pId && p.id !== pId) continue;
-      for (const v of (p.videos || [])) {
-        if (v.id === vId || v.driveFileId === vId) {
-          if (!v.cloudStream) v.cloudStream = {};
-          v.cloudStream[driveKey] = uploadedId;
-          if (isAlpha) v.isAlpha = true;
-          modified = true;
-        }
-      }
-    }
-    if (modified) {
-      storage.saveUserDb(userId, freshDb);
-    }
-  } catch (err) {
-    console.warn('[CloudStream] Erro ao persistir ID do cloudStream:', err.message);
-  }
-}
-
 // Transcodificador otimizado para reprodução web (PROXY e LQ)
 // Dimensionamento real de Proxy (1080p para PROXY e 720p para LQ) com aceleração por hardware (VideoToolbox no Mac)
-// Suporta perfeitamente proporções horizontais e verticais (9:16) e garante dimensões pares (trunc/2*2)
-function transcodeStreamProxy({ input, output, isAlpha, quality, isVertical = false, knownDurationSec = 0, onProgress }) {
+function transcodeStreamProxy({ input, output, isAlpha, quality, onProgress }) {
   let ffmpegPath = 'ffmpeg';
   try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
 
@@ -3169,40 +3095,39 @@ function transcodeStreamProxy({ input, output, isAlpha, quality, isVertical = fa
     return new Promise((resolve, reject) => {
       let args = ['-y', '-i', input, '-progress', 'pipe:1', '-map', '0:v:0', '-map', '0:a?'];
 
-      // Filtro de escala inteligente:
-      // Garante que LARGURA e ALTURA sejam SEMPRE divisíveis por 2 (trunc/2*2),
-      // respeita vídeos verticais (capping em 1080x1920 ou 720x1280), evitando resoluções 3.5K gigantes!
-      let scaleFilter;
-      if (quality === 'lq') {
-        scaleFilter = isVertical
-          ? "scale=-2:'trunc(min(1280,ih)/2)*2'"
-          : "scale='trunc(min(1280,iw)/2)*2':-2";
-      } else {
-        // PROXY: 1080p
-        scaleFilter = isVertical
-          ? "scale=-2:'trunc(min(1920,ih)/2)*2'"
-          : "scale='trunc(min(1920,iw)/2)*2':-2";
-      }
-
       if (isAlpha) {
         // Vídeo com transparência (Alpha) -> WebM VP9 com canal alfa (yuva420p)
-        const bitrate = quality === 'lq' ? '1.2M' : '2.5M';
-        args.push(
-          '-vf', scaleFilter,
-          '-c:v', 'libvpx-vp9',
-          '-pix_fmt', 'yuva420p',
-          '-speed', '8',
-          '-deadline', 'realtime',
-          '-b:v', bitrate,
-          '-auto-alt-ref', '0',
-          '-c:a', 'libopus',
-          '-b:a', '128k'
-        );
+        if (quality === 'lq') {
+          args.push(
+            '-vf', "scale='min(1280,iw)':-2",
+            '-c:v', 'libvpx-vp9',
+            '-pix_fmt', 'yuva420p',
+            '-speed', '8',
+            '-deadline', 'realtime',
+            '-b:v', '1.2M',
+            '-auto-alt-ref', '0',
+            '-c:a', 'libopus',
+            '-b:a', '128k'
+          );
+        } else {
+          // PROXY: 1080p web-ready com transparência impecável
+          args.push(
+            '-vf', "scale='min(1920,iw)':-2",
+            '-c:v', 'libvpx-vp9',
+            '-pix_fmt', 'yuva420p',
+            '-speed', '8',
+            '-deadline', 'realtime',
+            '-b:v', '2.5M',
+            '-auto-alt-ref', '0',
+            '-c:a', 'libopus',
+            '-b:a', '128k'
+          );
+        }
       } else {
         // Vídeo padrão sem alfa -> H.264 MP4 universalmente compatível
-        args.push('-vf', scaleFilter);
         if (quality === 'lq') {
           // LQ: 720p otimizado, ultra-rápido e ultraleve
+          args.push('-vf', "scale='min(1280,iw)':-2");
           if (useHardware) {
             args.push(
               '-c:v', 'h264_videotoolbox',
@@ -3229,6 +3154,7 @@ function transcodeStreamProxy({ input, output, isAlpha, quality, isVertical = fa
           }
         } else {
           // PROXY: Dimensionamento real de 1080p (como Frame.io e YouTube)
+          args.push('-vf', "scale='min(1920,iw)':-2");
           if (useHardware) {
             args.push(
               '-c:v', 'h264_videotoolbox',
@@ -3260,7 +3186,7 @@ function transcodeStreamProxy({ input, output, isAlpha, quality, isVertical = fa
 
       const proc = spawn(ffmpegPath, args);
       let errStr = '';
-      let totalDurationSec = knownDurationSec || 0;
+      let totalDurationSec = 0;
 
       proc.stderr.on('data', d => {
         const s = d.toString();
@@ -3330,8 +3256,7 @@ function transcodeStreamProxy({ input, output, isAlpha, quality, isVertical = fa
 
   return runEncoder(isMac && !isAlpha).catch(err => {
     if (isMac && !isAlpha) {
-      console.warn('[VideoTranscode] Hardware VideoToolbox falhou, limpando saída parcial e aplicando fallback software:', err.message);
-      try { if (fs.existsSync(output)) fs.unlinkSync(output); } catch (e) {}
+      console.warn('[VideoTranscode] Hardware VideoToolbox falhou, aplicando fallback software:', err.message);
       return runEncoder(false);
     }
     throw err;
@@ -3341,62 +3266,26 @@ function transcodeStreamProxy({ input, output, isAlpha, quality, isVertical = fa
 // Assegura versão otimizada (PROXY ou LQ) salva no Drive da conta conectada em .cloud_stream
 async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', project = null, onProgress = null) {
   let isAlpha = Boolean(video?.isAlpha);
+  const ext = isAlpha ? 'webm' : 'mp4';
+  const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
+  const cachePath = path.join(cacheDir, `${fileId}_${quality}.${ext}`);
+  const legacyCachePath = (quality === 'proxy') ? path.join(cacheDir, `${fileId}.${ext}`) : null;
+
+  if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+    if (typeof onProgress === 'function') onProgress(100);
+    return cachePath;
+  }
+  if (legacyCachePath && fs.existsSync(legacyCachePath) && fs.statSync(legacyCachePath).size > 0) {
+    if (typeof onProgress === 'function') onProgress(100);
+    return legacyCachePath;
+  }
+
   const driveKey = quality === 'lq' ? 'lqFileId' : 'proxyFileId';
-
-  // 1. Verifica cache local do servidor (MP4 ou WebM)
-  const cachePathMp4 = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}_${quality}.mp4`);
-  const cachePathWebm = path.join(ALPHA_CACHE_DIR, `${fileId}_${quality}.webm`);
-  const legacyPath = (quality === 'proxy') ? path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.${ext}`) : null;
-
-  if (fs.existsSync(cachePathWebm) && fs.statSync(cachePathWebm).size > 0) {
-    if (typeof onProgress === 'function') onProgress(100);
-    return cachePathWebm;
-  }
-  if (fs.existsSync(cachePathMp4) && fs.statSync(cachePathMp4).size > 0) {
-    if (typeof onProgress === 'function') onProgress(100);
-    return cachePathMp4;
-  }
-  if (legacyPath && fs.existsSync(legacyPath) && fs.statSync(legacyPath).size > 0) {
-    if (typeof onProgress === 'function') onProgress(100);
-    return legacyPath;
-  }
-
-  // 2. Verifica se o ID do arquivo já está gravado no video.cloudStream
   if (video?.cloudStream && video.cloudStream[driveKey]) {
     if (typeof onProgress === 'function') onProgress(100);
     return { cloudDriveId: video.cloudStream[driveKey], isAlpha };
   }
 
-  // 3. Procura se o arquivo já existe na pasta .cloud_stream do Drive
-  const parentFolderId = video?.driveFolderId || project?.driveFolderId || project?.folderId;
-  if (parentFolderId && userDb) {
-    try {
-      const token = await google.getDriveAccessToken(userDb).catch(() => null);
-      if (token) {
-        const streamFolder = await driveApi.getOrCreateCloudStreamFolder(userDb, parentFolderId).catch(() => null);
-        if (streamFolder && streamFolder.id) {
-          const streamNameMp4 = `.stream_${fileId}_${quality}.mp4`;
-          const streamNameWebm = `.stream_${fileId}_${quality}.webm`;
-          const foundMp4 = await driveApi.findStreamFileInDrive(userDb, streamFolder.id, streamNameMp4).catch(() => null);
-          const foundWebm = !foundMp4 ? await driveApi.findStreamFileInDrive(userDb, streamFolder.id, streamNameWebm).catch(() => null) : null;
-          const foundFile = foundMp4 || foundWebm;
-          if (foundFile && foundFile.id) {
-            const fileIsAlpha = Boolean(foundWebm);
-            if (video) {
-              if (!video.cloudStream) video.cloudStream = {};
-              video.cloudStream[driveKey] = foundFile.id;
-              if (fileIsAlpha) video.isAlpha = true;
-              persistCloudStreamId(userDb, project, video, driveKey, foundFile.id, fileIsAlpha);
-            }
-            if (typeof onProgress === 'function') onProgress(100);
-            return { cloudDriveId: foundFile.id, isAlpha: fileIsAlpha };
-          }
-        }
-      }
-    } catch (e) {}
-  }
-
-  // 4. Se não existe, executa o job de transcodificação (com deduplicação de promessas)
   const jobKey = `${fileId}_${quality}`;
   if (convertingWebJobs.has(jobKey)) {
     return convertingWebJobs.get(jobKey);
@@ -3404,8 +3293,8 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
 
   const job = (async () => {
     const tempSource = path.join(uploadTempDir, `src_stream_${fileId}_${Date.now()}.mov`);
+    const tempTarget = path.join(uploadTempDir, `out_stream_${jobKey}_${Date.now()}.${ext}`);
     let needCleanupTemp = false;
-    let tempTarget = null;
 
     try {
       let sourcePath = tempSource;
@@ -3428,28 +3317,14 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
         });
       }
 
-      // Sonda resolução, alpha e orientação do vídeo
-      const info = await probeVideoInfo(sourcePath);
-      if (info && info.hasAlpha) {
+      // Detecção de transparência
+      const detectedAlpha = await probeVideoAlpha(sourcePath);
+      if (detectedAlpha) {
         isAlpha = true;
         if (video) video.isAlpha = true;
       }
 
-      // Container e extensão corretos decididos estritamente APÓS a sondagem
-      const ext = isAlpha ? 'webm' : 'mp4';
-      const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
-      const cachePath = path.join(cacheDir, `${fileId}_${quality}.${ext}`);
-      tempTarget = path.join(uploadTempDir, `out_stream_${jobKey}_${Date.now()}.${ext}`);
-
-      await transcodeStreamProxy({
-        input: sourcePath,
-        output: tempTarget,
-        isAlpha,
-        quality,
-        isVertical: Boolean(info?.isVertical),
-        knownDurationSec: info?.durationSec || 0,
-        onProgress
-      });
+      await transcodeStreamProxy({ input: sourcePath, output: tempTarget, isAlpha, quality, onProgress });
 
       if (fs.existsSync(tempTarget) && fs.statSync(tempTarget).size > 0) {
         fs.renameSync(tempTarget, cachePath);
@@ -3457,11 +3332,11 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
         // Upload assíncrono para pasta oculta .cloud_stream no Google Drive
         (async () => {
           try {
-            const parentId = video?.driveFolderId || project?.driveFolderId || project?.folderId;
-            if (parentId && userDb) {
-              const streamFileName = `.stream_${fileId}_${quality}.${ext}`;
+            const parentFolderId = video?.driveFolderId || project?.driveFolderId || project?.folderId;
+            if (parentFolderId && userDb) {
+              const streamFileName = `.stream_${fileId}_${quality}.${isAlpha ? 'webm' : 'mp4'}`;
               const streamMime = isAlpha ? 'video/webm' : 'video/mp4';
-              const cloudStreamFolder = await driveApi.getOrCreateCloudStreamFolder(userDb, parentId);
+              const cloudStreamFolder = await driveApi.getOrCreateCloudStreamFolder(userDb, parentFolderId);
 
               const uploaded = await driveApi.uploadFileToFolder(
                 userDb,
@@ -3472,7 +3347,13 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
               );
 
               if (uploaded && uploaded.id) {
-                persistCloudStreamId(userDb, project, video, driveKey, uploaded.id, isAlpha);
+                if (video) {
+                  if (!video.cloudStream) video.cloudStream = {};
+                  video.cloudStream[driveKey] = uploaded.id;
+                  if (userDb && userDb.user && userDb.user.id) {
+                    storage.saveUserDb(userDb.user.id, userDb);
+                  }
+                }
               }
             }
           } catch (uploadErr) {
@@ -3490,9 +3371,7 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
       if (needCleanupTemp) {
         try { if (fs.existsSync(tempSource)) fs.unlinkSync(tempSource); } catch (e) {}
       }
-      if (tempTarget) {
-        try { if (fs.existsSync(tempTarget)) fs.unlinkSync(tempTarget); } catch (e) {}
-      }
+      try { if (fs.existsSync(tempTarget)) fs.unlinkSync(tempTarget); } catch (e) {}
       convertingWebJobs.delete(jobKey);
     }
   })();
@@ -3558,14 +3437,11 @@ class SyncQueueManager {
   enqueueVideosFromProject(project, userId) {
     if (!project || !Array.isArray(project.videos) || !userId) return [];
     const itemsToEnqueue = [];
-    const videoExts = ['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi', 'flv', 'wmv', 'prores', 'mts', 'm2ts', 'ts', '3gp', 'mxf'];
 
     for (const video of project.videos) {
-      const fileName = String(video.fileName || video.title || '').toLowerCase();
-      const mime = String(video.mimeType || '').toLowerCase();
-      const ext = fileName.split('.').pop() || '';
-      const isVideo = video.type === 'video' || mime.startsWith('video/') || videoExts.includes(ext);
-      if (!isVideo) continue;
+      const isImage = video.type === 'image' || (video.mimeType && video.mimeType.startsWith('image/'));
+      const isFolder = video.type === 'folder' || video.itemType === 'folder';
+      if (isImage || isFolder) continue;
 
       const fileId = video.driveFileId || video.id;
       if (!fileId) continue;
@@ -3903,6 +3779,22 @@ function streamLocalRangeFile(req, res, filePath, customContentType = null, cust
   }
 }
 
+function probeVideoAlpha(filePath) {
+  return new Promise((resolve) => {
+    let ffmpegPath = 'ffmpeg';
+    try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
+    const proc = spawn(ffmpegPath, ['-i', filePath]);
+    let errStr = '';
+    proc.stderr.on('data', d => errStr += d.toString());
+    proc.on('close', () => {
+      // Formats with alpha channel: yuva, rgba, argb, bgra, abgr, ya8, ap4h, ap4x, qtrle
+      const hasAlpha = /yuva|rgba|argb|bgra|abgr|ya8|ap4h|ap4x|qtrle/i.test(errStr);
+      resolve(hasAlpha);
+    });
+    proc.on('error', () => resolve(false));
+  });
+}
+
 async function ensureAlphaWebm(fileId, video, userDb) {
   const cachePath = path.join(ALPHA_CACHE_DIR, `${fileId}.webm`);
   if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
@@ -4060,15 +3952,13 @@ app.get('/api/stream/video-status', async (req, res) => {
     if (!found) return res.status(404).json({ error: 'Vídeo não encontrado' });
 
     const isAlpha = Boolean(found.video?.isAlpha);
-    const cachePathMp4 = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}_${quality}.mp4`);
-    const cachePathWebm = path.join(ALPHA_CACHE_DIR, `${fileId}_${quality}.webm`);
-    const legacyPath = (quality === 'proxy') ? path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`) : null;
-    const legacyWebm = (quality === 'proxy') ? path.join(ALPHA_CACHE_DIR, `${fileId}.webm`) : null;
+    const ext = isAlpha ? 'webm' : 'mp4';
+    const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
+    const cachePath = path.join(cacheDir, `${fileId}_${quality}.${ext}`);
+    const legacyPath = (quality === 'proxy') ? path.join(cacheDir, `${fileId}.${ext}`) : null;
 
-    if ((fs.existsSync(cachePathMp4) && fs.statSync(cachePathMp4).size > 0) ||
-        (fs.existsSync(cachePathWebm) && fs.statSync(cachePathWebm).size > 0) ||
-        (legacyPath && fs.existsSync(legacyPath) && fs.statSync(legacyPath).size > 0) ||
-        (legacyWebm && fs.existsSync(legacyWebm) && fs.statSync(legacyWebm).size > 0)) {
+    if ((fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) ||
+        (legacyPath && fs.existsSync(legacyPath) && fs.statSync(legacyPath).size > 0)) {
       return res.json({ ready: true, converting: false, needsTranscode: true });
     }
 

@@ -441,6 +441,9 @@ class CustomVideoPlayer {
 
     this.setBuffering(true, true);
 
+    const overlay = this.container.querySelector('#alphaTranscodeOverlay');
+    const textEl = this.container.querySelector('#alphaTranscodeText');
+
     let restored = false;
     const restoreTime = () => {
       if (restored) return;
@@ -449,15 +452,69 @@ class CustomVideoPlayer {
         try { this.video.currentTime = curTime; } catch (e) {}
       }
       this.setBuffering(false);
+      if (overlay) overlay.style.display = 'none';
       if (wasPlaying) {
         this.video.play().catch(() => {});
       }
     };
 
-    this.video.addEventListener('loadedmetadata', restoreTime, { once: true });
-    this.video.addEventListener('canplay', restoreTime, { once: true });
-    this.video.src = newUrl;
-    this.video.load();
+    if (this.qualityPollTimer) {
+      clearTimeout(this.qualityPollTimer);
+      this.qualityPollTimer = null;
+    }
+
+    if (quality === 'original') {
+      if (overlay) overlay.style.display = 'none';
+      this.video.addEventListener('loadedmetadata', restoreTime, { once: true });
+      this.video.addEventListener('canplay', restoreTime, { once: true });
+      this.video.src = newUrl;
+      this.video.load();
+      return;
+    }
+
+    // Modo PROXY ou LQ: verifica se já está pronto no servidor
+    const driveMatch = (this.videoData.url || '').match(/drive=([a-zA-Z0-9_-]+)/);
+    const driveId = driveMatch ? driveMatch[1] : null;
+    const pathMatch = (this.videoData.url || '').match(/path=([^&]+)/);
+    const localPath = pathMatch ? pathMatch[1] : null;
+    const queryParam = driveId ? `drive=${encodeURIComponent(driveId)}&quality=${quality}` : `path=${localPath}&quality=${quality}`;
+
+    const checkReadyAndLoad = async () => {
+      try {
+        const res = await fetch(`/api/stream/video-status?${queryParam}`);
+        if (!res.ok) {
+          // Fallback direto se falhar
+          this.video.addEventListener('loadedmetadata', restoreTime, { once: true });
+          this.video.addEventListener('canplay', restoreTime, { once: true });
+          this.video.src = newUrl;
+          this.video.load();
+          return;
+        }
+        const data = await res.json();
+        if (data.ready) {
+          if (overlay) overlay.style.display = 'none';
+          this.video.addEventListener('loadedmetadata', restoreTime, { once: true });
+          this.video.addEventListener('canplay', restoreTime, { once: true });
+          const bustUrl = `${newUrl}${newUrl.includes('?') ? '&' : '?'}vready=${Date.now()}`;
+          this.video.src = bustUrl;
+          this.video.load();
+        } else {
+          // Exibe overlay informando que está gerando a versão otimizada
+          if (overlay) {
+            if (textEl) textEl.textContent = 'Otimizando vídeo para reprodução no navegador...';
+            overlay.style.display = 'flex';
+          }
+          this.qualityPollTimer = setTimeout(checkReadyAndLoad, 1200);
+        }
+      } catch (e) {
+        this.video.addEventListener('loadedmetadata', restoreTime, { once: true });
+        this.video.addEventListener('canplay', restoreTime, { once: true });
+        this.video.src = newUrl;
+        this.video.load();
+      }
+    };
+
+    checkReadyAndLoad();
   }
 
   checkBufferThreshold() {
@@ -1895,6 +1952,7 @@ class CustomVideoPlayer {
     clearTimeout(this._bufferingTimer);
     clearTimeout(this.alphaPollTimer);
     clearTimeout(this.transcodePollTimer);
+    clearTimeout(this.qualityPollTimer);
     clearTimeout(this.inactivityTimer);
     clearTimeout(this.volumeHideTimer);
     if (this.onVolumeGlobalMouseUp) {

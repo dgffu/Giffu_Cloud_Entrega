@@ -384,10 +384,10 @@ class CustomVideoPlayer {
   getQualityTooltip(quality = this.currentQuality) {
     const originalRes = this.classifyResolution(this.videoData.realHeight ? (this.videoData.realWidth || this.videoData.resolution) : this.videoData.resolution, this.videoData.realHeight || this.videoData.height);
     if (quality === 'proxy') {
-      return `Proxy Otimizado (1080p) • Clique para alternar`;
+      return `Proxy Otimizado (${originalRes}) • Clique para alternar`;
     }
     if (quality === 'lq') {
-      return 'Qualidade Baixa (720p LQ) • Clique para alternar';
+      return 'Qualidade Baixa (1080p LQ) • Clique para alternar';
     }
     return `Qualidade Original (${originalRes}) • Clique para alternar`;
   }

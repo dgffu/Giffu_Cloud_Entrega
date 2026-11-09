@@ -15,6 +15,14 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 * 1024 } // 10 GB
 });
 
+// Tratamento global de exceções e rejeições para proteger o processo Node contra quedas em produção (Railway/Docker)
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Exceção não capturada interceptada para prevenir queda do servidor:', err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Rejeição assíncrona não tratada interceptada:', reason);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -2974,36 +2982,63 @@ function probeVideoNeedsWebTranscode(filePath) {
   });
 }
 
+// Mutex global para garantir que no máximo 1 transcodificação ocorra por vez em todo o sistema.
+// Previne sobrecarga de memória (OOM / Exit code 137) e picos de CPU no servidor cloud (Railway/Docker).
+let transcodeLock = Promise.resolve();
+function runWithTranscodeLock(fn) {
+  const current = transcodeLock;
+  let release;
+  transcodeLock = new Promise((res) => { release = res; });
+  return current
+    .then(() => fn())
+    .finally(() => {
+      release();
+    });
+}
+
 function transcodeVideoToH264(input, output) {
   let ffmpegPath = 'ffmpeg';
   try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
 
-  return new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegPath, [
-      '-y',
-      '-i', input,
-      '-map', '0:v:0',
-      '-map', '0:a?',
-      '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-crf', '21',
-      '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac',
-      '-b:a', '192k',
-      '-movflags', '+faststart',
-      output
-    ]);
+  return runWithTranscodeLock(() => {
+    return new Promise((resolve, reject) => {
+      const isDarwin = process.platform === 'darwin';
+      const videoArgs = isDarwin
+        ? ['-c:v', 'h264_videotoolbox', '-b:v', '3500k']
+        : [
+            '-threads', '2',
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-tune', 'fastdecode',
+            '-x264-params', 'threads=2:lookahead-threads=1:rc-lookahead=10:sync-lookahead=0',
+            '-crf', '23'
+          ];
 
-    let errStr = '';
-    proc.stderr.on('data', d => errStr += d.toString());
-    proc.on('close', code => {
-      if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
-        resolve();
-      } else {
-        reject(new Error(`FFmpeg web transcode failed with code ${code}: ${errStr.slice(-300)}`));
-      }
+      const proc = spawn(ffmpegPath, [
+        '-y',
+        '-i', input,
+        '-map', '0:v:0',
+        '-map', '0:a?',
+        ...videoArgs,
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ac', '2',
+        '-movflags', '+faststart',
+        output
+      ]);
+
+      let errStr = '';
+      proc.stderr.on('data', d => errStr += d.toString());
+      proc.on('close', code => {
+        if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
+          resolve();
+        } else {
+          reject(new Error(`FFmpeg web transcode failed with code ${code}: ${errStr.slice(-300)}`));
+        }
+      });
+      proc.on('error', reject);
     });
-    proc.on('error', reject);
   });
 }
 
@@ -3097,7 +3132,7 @@ function transcodeFrameIoRendition(input, output, targetHeight = 1080, isAlpha =
   let ffmpegPath = 'ffmpeg';
   try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
 
-  return new Promise(async (resolve, reject) => {
+  return runWithTranscodeLock(async () => {
     // Sonda o aspecto real do arquivo original para evitar distorções
     let isVertical = false;
     try {
@@ -3121,11 +3156,14 @@ function transcodeFrameIoRendition(input, output, targetHeight = 1080, isAlpha =
     if (isAlpha) {
       args = [
         '-y',
+        '-threads', '2',
         '-i', input,
         '-map', '0:v:0',
         '-map', '0:a?',
         '-vf', scaleFilter,
         '-c:v', 'libvpx-vp9',
+        '-deadline', 'realtime',
+        '-cpu-used', '4',
         '-pix_fmt', 'yuva420p',
         '-b:v', '0',
         '-crf', '32',
@@ -3152,13 +3190,18 @@ function transcodeFrameIoRendition(input, output, targetHeight = 1080, isAlpha =
     } else {
       args = [
         '-y',
+        '-threads', '2',
         '-i', input,
         '-map', '0:v:0',
         '-map', '0:a?',
         '-vf', scaleFilter,
         '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-crf', targetHeight >= 1080 ? '22' : '24',
+        '-preset', 'ultrafast',
+        '-tune', 'fastdecode',
+        '-x264-params', 'threads=2:lookahead-threads=1:rc-lookahead=10:sync-lookahead=0',
+        '-maxrate', targetHeight >= 1080 ? '3200k' : (targetHeight >= 720 ? '1800k' : '800k'),
+        '-bufsize', targetHeight >= 1080 ? '4500k' : (targetHeight >= 720 ? '2500k' : '1200k'),
+        '-crf', targetHeight >= 1080 ? '24' : (targetHeight >= 720 ? '26' : '28'),
         '-pix_fmt', 'yuv420p',
         '-c:a', 'aac',
         '-b:a', '128k',
@@ -3168,62 +3211,66 @@ function transcodeFrameIoRendition(input, output, targetHeight = 1080, isAlpha =
       ];
     }
 
-    const proc = spawn(ffmpegPath, args);
-    let errStr = '';
+    return new Promise((resolve, reject) => {
+      const proc = spawn(ffmpegPath, args);
+      let errStr = '';
 
-    proc.stderr.on('data', d => {
-      const text = d.toString();
-      errStr += text;
-      if (onProgress && duration > 0) {
-        const timeMatch = text.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
-        if (timeMatch) {
-          const secs = parseInt(timeMatch[1], 10) * 3600 + parseInt(timeMatch[2], 10) * 60 + parseFloat(timeMatch[3]);
-          const pct = Math.min(99, Math.max(1, Math.round((secs / duration) * 100)));
-          onProgress(pct);
+      proc.stderr.on('data', d => {
+        const text = d.toString();
+        errStr += text;
+        if (onProgress && duration > 0) {
+          const timeMatch = text.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+          if (timeMatch) {
+            const secs = parseInt(timeMatch[1], 10) * 3600 + parseInt(timeMatch[2], 10) * 60 + parseFloat(timeMatch[3]);
+            const pct = Math.min(99, Math.max(1, Math.round((secs / duration) * 100)));
+            onProgress(pct);
+          }
         }
-      }
-    });
+      });
 
-    proc.on('close', code => {
-      if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
-        if (onProgress) onProgress(100);
-        resolve();
-      } else {
-        if (isDarwin && !isAlpha && !errStr.includes('FallbackAttempted')) {
-          try { if (fs.existsSync(output)) fs.unlinkSync(output); } catch (e) {}
-          const fallbackArgs = [
-            '-y',
-            '-i', input,
-            '-map', '0:v:0',
-            '-map', '0:a?',
-            '-vf', scaleFilter,
-            '-c:v', 'libx264',
-            '-preset', 'veryfast',
-            '-crf', '23',
-            '-pix_fmt', 'yuv420p',
-            '-c:a', 'aac',
-            '-b:a', '128k',
-            '-ac', '2',
-            '-movflags', '+faststart',
-            output
-          ];
-          const fbProc = spawn(ffmpegPath, fallbackArgs);
-          fbProc.on('close', fbCode => {
-            if (fbCode === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
-              if (onProgress) onProgress(100);
-              resolve();
-            } else {
-              reject(new Error(`Fallback libx264 falhou com código ${fbCode}`));
-            }
-          });
-          fbProc.on('error', reject);
-          return;
+      proc.on('close', code => {
+        if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
+          if (onProgress) onProgress(100);
+          resolve();
+        } else {
+          if (isDarwin && !isAlpha && !errStr.includes('FallbackAttempted')) {
+            try { if (fs.existsSync(output)) fs.unlinkSync(output); } catch (e) {}
+            const fallbackArgs = [
+              '-y',
+              '-threads', '2',
+              '-i', input,
+              '-map', '0:v:0',
+              '-map', '0:a?',
+              '-vf', scaleFilter,
+              '-c:v', 'libx264',
+              '-preset', 'ultrafast',
+              '-x264-params', 'threads=2:lookahead-threads=1:rc-lookahead=10:sync-lookahead=0',
+              '-crf', '24',
+              '-pix_fmt', 'yuv420p',
+              '-c:a', 'aac',
+              '-b:a', '128k',
+              '-ac', '2',
+              '-movflags', '+faststart',
+              output
+            ];
+            const fbProc = spawn(ffmpegPath, fallbackArgs);
+            fbProc.on('close', fbCode => {
+              if (fbCode === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
+                if (onProgress) onProgress(100);
+                resolve();
+              } else {
+                reject(new Error(`Fallback libx264 falhou com código ${fbCode}`));
+              }
+            });
+            fbProc.on('error', reject);
+            return;
+          }
+          reject(new Error(`FFmpeg falhou com código ${code}: ${errStr.slice(-300)}`));
         }
-        reject(new Error(`FFmpeg falhou com código ${code}: ${errStr.slice(-300)}`));
-      }
-    });
+      });
 
-    proc.on('error', reject);
+      proc.on('error', reject);
+    });
   });
 }
 
@@ -3968,6 +4015,12 @@ app.get('/api/stream/video-status', async (req, res) => {
       return res.json({ ready: true, percent: 100, converting: false, quality });
     }
 
+    // Verifica se já está sendo transcodificado
+    const jobKey = `${fileId}_${quality}`;
+    if (convertingCloudStreamJobs.has(jobKey)) {
+      return res.json({ ready: false, percent: 35, converting: true, quality });
+    }
+
     // Verifica se está ativo na fila de sincronização
     if (syncQueueManager.activeItem && syncQueueManager.activeItem.fileId === fileId) {
       return res.json({ ready: false, percent: syncQueueManager.activeItem.percent || 0, converting: true, quality });
@@ -3977,7 +4030,7 @@ app.get('/api/stream/video-status', async (req, res) => {
       return res.json({ ready: false, percent: 0, queued: true, converting: false, quality });
     }
 
-    // Se não estiver na fila, inicia sob demanda em background
+    // Se não estiver na fila nem sendo processado, inicia respeitando o lock global de concorrência
     ensureCloudStreamRendition(fileId, found.video, found.userDb, quality, found.project).catch(err => {
       console.warn(`[CloudStream] Aviso ao gerar rendição sob demanda ${quality}:`, err.message);
     });

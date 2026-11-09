@@ -800,7 +800,13 @@ async function uploadFileToFolder(readDB, targetFolderId, localFilePath, origina
 
   // 2. Transmitir o arquivo local em streaming para a URL do upload resumível
   const uploadRes = await new Promise((resolve, reject) => {
-    const fileStream = fs.createReadStream(localFilePath);
+    let fileStream;
+    try {
+      fileStream = fs.createReadStream(localFilePath);
+    } catch (streamInitErr) {
+      return reject(streamInitErr);
+    }
+
     const req = https.request(uploadUrl, {
       method: 'PUT',
       headers: {
@@ -817,13 +823,17 @@ async function uploadFileToFolder(readDB, targetFolderId, localFilePath, origina
         resolve({ status: res.statusCode, json, body });
       });
     });
-    req.on('timeout', () => req.destroy(new Error('Tempo esgotado durante o envio do arquivo para o Google Drive')));
-    req.on('error', reject);
-    fileStream.pipe(req);
+
     fileStream.on('error', (err) => {
-      req.destroy(err);
+      try { req.destroy(err); } catch (e) {}
       reject(err);
     });
+    req.on('timeout', () => req.destroy(new Error('Tempo esgotado durante o envio do arquivo para o Google Drive')));
+    req.on('error', (err) => {
+      try { fileStream.destroy(); } catch (e) {}
+      reject(err);
+    });
+    fileStream.pipe(req);
   });
 
   if (uploadRes.status !== 200 && uploadRes.status !== 201) {

@@ -1960,6 +1960,7 @@ app.post('/api/projects/:id/upload', requireAuthor, upload.any(), async (req, re
   if (uploadedItems.length > 0) {
     project.updatedAt = new Date().toISOString();
     storage.saveUserDb(req.user.id, userDb);
+    syncQueueManager.enqueueVideosFromProject(project, userDb);
   }
 
   if (uploadedItems.length === 0 && errors.length > 0) {
@@ -3096,13 +3097,27 @@ function transcodeFrameIoRendition(input, output, targetHeight = 1080, isAlpha =
   let ffmpegPath = 'ffmpeg';
   try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
 
-  return new Promise((resolve, reject) => {
-    let args = [];
+  return new Promise(async (resolve, reject) => {
+    // Sonda o aspecto real do arquivo original para evitar distorções
+    let isVertical = false;
+    try {
+      const vInfo = await probeVideoInfo(input);
+      if (vInfo.height > vInfo.width) {
+        isVertical = true;
+      }
+      if (!duration && vInfo.duration) {
+        duration = vInfo.duration;
+      }
+    } catch (e) {}
+
     const isDarwin = process.platform === 'darwin';
     const maxWidth = Math.round(targetHeight * 16 / 9);
     // Dimensões sempre pares com preservação de vídeos verticais (9:16)
-    const scaleFilter = `"scale='if(gt(ih,iw),-2,trunc(min(${maxWidth},iw)/2)*2)':'if(gt(ih,iw),trunc(min(${targetHeight},ih)/2)*2,-2)'"`;
+    const scaleFilter = isVertical
+      ? `scale=-2:'trunc(min(${targetHeight},ih)/2)*2'`
+      : `scale='trunc(min(${maxWidth},iw)/2)*2':-2`;
 
+    let args = [];
     if (isAlpha) {
       args = [
         '-y',
@@ -3153,7 +3168,7 @@ function transcodeFrameIoRendition(input, output, targetHeight = 1080, isAlpha =
       ];
     }
 
-    const proc = spawn(ffmpegPath, args, { shell: true });
+    const proc = spawn(ffmpegPath, args);
     let errStr = '';
 
     proc.stderr.on('data', d => {
@@ -3188,10 +3203,11 @@ function transcodeFrameIoRendition(input, output, targetHeight = 1080, isAlpha =
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
             '-b:a', '128k',
+            '-ac', '2',
             '-movflags', '+faststart',
             output
           ];
-          const fbProc = spawn(ffmpegPath, fallbackArgs, { shell: true });
+          const fbProc = spawn(ffmpegPath, fallbackArgs);
           fbProc.on('close', fbCode => {
             if (fbCode === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
               if (onProgress) onProgress(100);
@@ -3298,14 +3314,20 @@ async function ensureCloudStreamRendition(fileId, video, userDb, rendition = '10
 
     try {
       if (onProgress) onProgress(5);
-      const stream = await driveApi.getFileStream(userDb, fileId);
-      const ws = fs.createWriteStream(tempSource);
-      stream.pipe(ws);
-      await new Promise((resolve, reject) => {
-        ws.on('finish', resolve);
-        ws.on('error', reject);
-        stream.on('error', reject);
-      });
+      if (video?.localPath && fs.existsSync(video.localPath)) {
+        fs.copyFileSync(video.localPath, tempSource);
+      } else if (fileId && typeof fileId === 'string' && fs.existsSync(fileId)) {
+        fs.copyFileSync(fileId, tempSource);
+      } else {
+        const stream = await driveApi.getFileStream(userDb, fileId);
+        const ws = fs.createWriteStream(tempSource);
+        stream.pipe(ws);
+        await new Promise((resolve, reject) => {
+          ws.on('finish', resolve);
+          ws.on('error', reject);
+          stream.on('error', reject);
+        });
+      }
       if (onProgress) onProgress(20);
 
       // Sonda informações do vídeo
@@ -3322,18 +3344,18 @@ async function ensureCloudStreamRendition(fileId, video, userDb, rendition = '10
 
       // Salva no cache local do servidor
       fs.copyFileSync(tempTarget, cachePath);
+      persistCloudStreamId(userDb.user.id, project?.id, video?.id, rendition, 'cached');
       if (onProgress) onProgress(88);
 
       // 4. Faz upload para a pasta .cloud_stream do Google Drive se o token estiver disponível
       let uploadedFileId = null;
       if (cloudStreamFolder && cloudStreamFolder.id) {
         try {
-          const uploadRes = await driveApi.uploadFileToDrive(
+          const uploadRes = await driveApi.uploadFileToFolder(
             userDb,
             cloudStreamFolder.id,
+            tempTarget,
             `stream_${rendition}_${fileId}.${ext}`,
-            fs.createReadStream(tempTarget),
-            fs.statSync(tempTarget).size,
             isAlpha ? 'video/webm' : 'video/mp4'
           );
           if (uploadRes && uploadRes.id) {
@@ -3384,16 +3406,23 @@ class SyncQueueManager {
       const isVideo = mime.startsWith('video/') || mime === 'application/x-mpegurl' || videoExts.has(ext);
       if (!isVideo) continue;
 
-      // Se já tem rendição 1080p registrada no cloudStream, já está processado
+      const fileId = v.driveFileId || (v.url && (v.url.match(/drive=([a-zA-Z0-9_-]+)/) || [])[1]) || v.localPath || v.id;
+      if (!fileId) continue;
+
+      // Se já tem rendição 1080p registrada no cloudStream ou no cache local, já está processado
       if (v.cloudStream && v.cloudStream.renditions && v.cloudStream.renditions['1080p']) {
         continue;
       }
-
-      const fileId = v.driveFileId || (v.url && (v.url.match(/drive=([a-zA-Z0-9_-]+)/) || [])[1]);
-      if (!fileId) continue;
+      const cacheDir = v.isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
+      const extR = v.isAlpha ? 'webm' : 'mp4';
+      if (fs.existsSync(path.join(cacheDir, `${fileId}_1080p.${extR}`))) {
+        continue;
+      }
 
       const alreadyInQueue = this.queue.some(item => item.fileId === fileId) || (this.activeItem && this.activeItem.fileId === fileId);
       if (alreadyInQueue) continue;
+
+      const userId = userDb?.user?.id || userDb?.id || 'default';
 
       this.queue.push({
         id: `sync-${fileId}-${Date.now()}`,
@@ -3404,7 +3433,7 @@ class SyncQueueManager {
         fileName: v.fileName || `${v.title || 'video'}.mp4`,
         isAlpha: Boolean(v.isAlpha),
         percent: 0,
-        userId: userDb.user.id
+        userId
       });
       addedAny = true;
     }

@@ -98,7 +98,7 @@ class CustomVideoPlayer {
 
       if (!this.isInteracting) {
         this.inactivityTimer = setTimeout(() => {
-          if (!this.isInteracting) {
+          if (!this.isInteracting && !this.isSettingsOpen) {
             this.container.classList.remove('user-active');
             this.container.classList.add('user-inactive');
           }
@@ -108,7 +108,7 @@ class CustomVideoPlayer {
 
     this.hideHUDImmediate = () => {
       clearTimeout(this.inactivityTimer);
-      if (!this.isInteracting) {
+      if (!this.isInteracting && !this.isSettingsOpen) {
         this.container.classList.remove('user-active');
         this.container.classList.add('user-inactive');
       }
@@ -129,6 +129,7 @@ class CustomVideoPlayer {
 
     this.onMouseLeave = () => {
       if (Date.now() - this._lastTouchTime < 800) return;
+      if (this.isSettingsOpen) return;
       this.hideHUDImmediate();
     };
 
@@ -399,14 +400,25 @@ class CustomVideoPlayer {
     return url;
   }
 
+  getFormatResolutionName(label) {
+    const str = String(label || '').toUpperCase();
+    if (str === 'ULTRA') return '8K';
+    if (str === '4K') return '4K';
+    if (str === 'FHD') return '1080p';
+    if (str === 'HD') return '720p';
+    if (str === 'SD') return '360p';
+    return str || '1080p';
+  }
+
   getResolutionInfo() {
     const w = this.video?.videoWidth || Number(this.videoData.width) || 0;
     const h = this.video?.videoHeight || Number(this.videoData.height) || 0;
-    let label = this.classifyResolution(this.videoData.resolution);
+    let rawLabel = this.classifyResolution(this.videoData.resolution);
     if (w && h) {
-      label = this.classifyResolution(w, h);
+      rawLabel = this.classifyResolution(w, h);
     }
-    return { width: w, height: h, label };
+    const formatName = this.getFormatResolutionName(rawLabel);
+    return { width: w, height: h, rawLabel, formatName };
   }
 
   updateSettingsUI() {
@@ -418,8 +430,8 @@ class CustomVideoPlayer {
     let currentText = '1080p HD';
 
     if (this.currentQuality === 'original') {
-      badgeText = resInfo.label;
-      currentText = `Original (${resInfo.label})`;
+      badgeText = resInfo.formatName === '4K' ? '4K' : (['1080p', '720p'].includes(resInfo.formatName) ? 'HD' : 'SD');
+      currentText = `Original (${resInfo.formatName})`;
     } else if (this.currentQuality === '1080p') {
       badgeText = 'HD';
       currentText = '1080p HD';
@@ -433,7 +445,7 @@ class CustomVideoPlayer {
 
     if (gearBadge) gearBadge.textContent = badgeText;
     if (qualityText) qualityText.textContent = currentText;
-    if (this.qualityBadgeText) this.qualityBadgeText.textContent = resInfo.label;
+    if (this.qualityBadgeText) this.qualityBadgeText.textContent = resInfo.rawLabel;
 
     this.renderQualitySubmenu();
   }
@@ -447,7 +459,7 @@ class CustomVideoPlayer {
     const minDim = Math.min(resInfo.width, resInfo.height);
 
     const options = [
-      { id: 'original', name: `Original (${resInfo.label})`, tag: '' }
+      { id: 'original', name: `Original (${resInfo.formatName})`, tag: '' }
     ];
 
     if (minDim >= 900 || maxDim >= 1800 || minDim === 0) {
@@ -590,11 +602,13 @@ class CustomVideoPlayer {
     const popover = this.container.querySelector('#playerSettingsPopover');
     const mainPanel = this.container.querySelector('#settingsMainPanel');
     const subPanel = this.container.querySelector('#settingsQualitySubmenu');
+    const menuItemQuality = this.container.querySelector('#menuItemQuality');
     if (popover) {
-      popover.style.display = 'block';
+      popover.style.display = 'flex';
     }
     if (mainPanel) mainPanel.style.display = 'flex';
     if (subPanel) subPanel.style.display = 'none';
+    if (menuItemQuality) menuItemQuality.classList.remove('is-active');
     this.updateSettingsUI();
   }
 
@@ -602,17 +616,28 @@ class CustomVideoPlayer {
     this.isSettingsOpen = false;
     this.isQualitySubmenuOpen = false;
     const popover = this.container.querySelector('#playerSettingsPopover');
+    const menuItemQuality = this.container.querySelector('#menuItemQuality');
     if (popover) {
       popover.style.display = 'none';
     }
+    if (menuItemQuality) menuItemQuality.classList.remove('is-active');
   }
 
   openQualitySubmenu() {
     this.isQualitySubmenuOpen = true;
     const mainPanel = this.container.querySelector('#settingsMainPanel');
     const subPanel = this.container.querySelector('#settingsQualitySubmenu');
-    if (mainPanel) mainPanel.style.display = 'none';
-    if (subPanel) subPanel.style.display = 'flex';
+    const menuItemQuality = this.container.querySelector('#menuItemQuality');
+    const isWide = (this.container.clientWidth || window.innerWidth) >= 500;
+    if (isWide) {
+      if (mainPanel) mainPanel.style.display = 'flex';
+      if (subPanel) subPanel.style.display = 'flex';
+      if (menuItemQuality) menuItemQuality.classList.add('is-active');
+    } else {
+      if (mainPanel) mainPanel.style.display = 'none';
+      if (subPanel) subPanel.style.display = 'flex';
+      if (menuItemQuality) menuItemQuality.classList.remove('is-active');
+    }
     this.renderQualitySubmenu();
   }
 
@@ -620,8 +645,10 @@ class CustomVideoPlayer {
     this.isQualitySubmenuOpen = false;
     const mainPanel = this.container.querySelector('#settingsMainPanel');
     const subPanel = this.container.querySelector('#settingsQualitySubmenu');
+    const menuItemQuality = this.container.querySelector('#menuItemQuality');
     if (mainPanel) mainPanel.style.display = 'flex';
     if (subPanel) subPanel.style.display = 'none';
+    if (menuItemQuality) menuItemQuality.classList.remove('is-active');
   }
 
   formatTime(seconds) {
@@ -1783,7 +1810,12 @@ class CustomVideoPlayer {
     if (menuItemQuality) {
       menuItemQuality.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.openQualitySubmenu();
+        const isWide = (this.container.clientWidth || window.innerWidth) >= 500;
+        if (this.isQualitySubmenuOpen && isWide) {
+          this.closeQualitySubmenu();
+        } else {
+          this.openQualitySubmenu();
+        }
       });
     }
 

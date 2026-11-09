@@ -689,17 +689,12 @@
   position: absolute;
   bottom: calc(100% + 14px);
   right: -8px;
-  background: rgba(22, 25, 33, 0.96);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
   z-index: 60;
-  min-width: 215px;
-  padding: 6px;
   user-select: none;
-  animation: frameIoMenuIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
 }
 
 @keyframes frameIoMenuIn {
@@ -717,6 +712,25 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  background: rgba(28, 33, 46, 0.96);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  min-width: 215px;
+  padding: 6px;
+  animation: frameIoMenuIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settings-sub-panel {
+  min-width: 175px;
+}
+
+@media (min-width: 500px) {
+  .settings-sub-panel .settings-submenu-header {
+    display: none;
+  }
 }
 
 .settings-menu-item {
@@ -735,6 +749,12 @@
 
 .settings-menu-item:hover {
   background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.settings-menu-item.is-active {
+  background: rgba(255, 255, 255, 0.09);
+  outline: 1px solid rgba(255, 255, 255, 0.22);
   color: #ffffff;
 }
 

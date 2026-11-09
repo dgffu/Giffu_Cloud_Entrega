@@ -1060,18 +1060,22 @@ class SyncQueueManagerUI {
     this.updateBadge();
 
     if (this.isOpen) {
-      const currentActiveId = this.activeItem ? this.activeItem.id : null;
-      if (currentActiveId && currentActiveId === prevActiveId && prevCount === this.totalCount) {
-        const pctEl = document.getElementById('syncActivePercentText');
-        const barEl = document.getElementById('syncActiveProgressBar');
-        if (pctEl && barEl) {
-          const pct = Math.min(100, Math.max(0, this.activeItem.percent || 0));
-          pctEl.textContent = `${pct}%`;
-          barEl.style.width = `${pct}%`;
-          return;
+      if (this.totalCount === 0) {
+        this.closePopover();
+      } else {
+        const currentActiveId = this.activeItem ? this.activeItem.id : null;
+        if (currentActiveId && currentActiveId === prevActiveId && prevCount === this.totalCount) {
+          const pctEl = document.getElementById('syncActivePercentText');
+          const barEl = document.getElementById('syncActiveProgressBar');
+          if (pctEl && barEl) {
+            const pct = Math.min(100, Math.max(0, this.activeItem.percent || 0));
+            pctEl.textContent = `${pct}%`;
+            barEl.style.width = `${pct}%`;
+            return;
+          }
         }
+        this.renderPopoverList();
       }
-      this.renderPopoverList();
     }
   }
 
@@ -1091,9 +1095,11 @@ class SyncQueueManagerUI {
 
     if (btn) {
       if (count > 0) {
+        btn.style.display = 'inline-flex';
         btn.classList.add('is-syncing');
       } else {
         btn.classList.remove('is-syncing');
+        btn.style.display = 'none';
       }
     }
 
@@ -1139,7 +1145,7 @@ class SyncQueueManagerUI {
 
     targetEl.innerHTML = `
       <div class="sync-queue-wrapper" id="syncQueueWrapper">
-        <button type="button" class="btn-sync-queue" id="btnSyncQueue" title="Sincronização na Nuvem">
+        <button type="button" class="btn-sync-queue" id="btnSyncQueue" title="Sincronização na Nuvem" style="display: none;">
           <svg class="sync-icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
           </svg>
@@ -5887,6 +5893,9 @@ class EntregaApp {
         await this.fetchData();
         this.selectedProject = this.data.projects.find(p => p.id === proj.id);
         this.render();
+        if (this.syncQueueManager) {
+          this.syncQueueManager.fetchQueue();
+        }
       } catch (e) {
         window.showToast('Erro ao espelhar Drive');
       }

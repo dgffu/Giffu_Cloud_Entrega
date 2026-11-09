@@ -793,6 +793,9 @@ app.post('/api/projects', requireAuthor, async (req, res) => {
   currentDb.projects.unshift(newProject);
   storage.saveUserDb(req.user.id, currentDb);
 
+  // Enfileira geração de proxies em segundo plano na criação do diretório
+  syncQueueManager.enqueueVideosFromProject(newProject, req.user.id);
+
   res.status(201).json(newProject);
 });
 
@@ -881,6 +884,10 @@ app.put('/api/projects/:id', requireAuthor, async (req, res) => {
   existing.updatedAt = new Date().toISOString();
   currentDb.projects[index] = existing;
   storage.saveUserDb(req.user.id, currentDb);
+
+  if (driveLink !== undefined && driveLink.trim()) {
+    syncQueueManager.enqueueVideosFromProject(existing, req.user.id);
+  }
 
   res.json(existing);
 });
@@ -2630,6 +2637,32 @@ app.get('/api/notifications', (req, res) => {
   });
 });
 
+// Status da fila de sincronização de proxies em segundo plano
+app.get('/api/sync/queue', (req, res) => {
+  if (!req.user || !req.user.isAuthor) {
+    return res.json({ ok: true, activeItem: null, queue: [], totalCount: 0 });
+  }
+  res.json({
+    ok: true,
+    ...syncQueueManager.getStatus()
+  });
+});
+
+// Varredura de todos os projetos para enfileirar proxies ausentes
+app.post('/api/sync/scan-all', requireAuthor, (req, res) => {
+  const userDb = storage.getUserDb(req.user.id);
+  let totalEnqueued = 0;
+  for (const proj of (userDb.projects || [])) {
+    const enqueued = syncQueueManager.enqueueVideosFromProject(proj, req.user.id);
+    totalEnqueued += enqueued.length;
+  }
+  res.json({
+    ok: true,
+    enqueuedCount: totalEnqueued,
+    ...syncQueueManager.getStatus()
+  });
+});
+
 // 12. Sync from Google Drive link
 app.post('/api/drive/sync', requireAuthor, async (req, res) => {
   const userDb = storage.getUserDb(req.user.id);
@@ -2660,6 +2693,9 @@ app.post('/api/drive/sync', requireAuthor, async (req, res) => {
   applyMirror(project, draft);
   project.updatedAt = new Date().toISOString();
   storage.saveUserDb(req.user.id, currentDb);
+
+  // Enfileira geração de proxies em segundo plano para novos vídeos
+  syncQueueManager.enqueueVideosFromProject(project, req.user.id);
 
   const count = project.videos.length;
   const videoCount = (project.videos || []).filter(v => v.type !== 'image').length;
@@ -3049,7 +3085,7 @@ async function ensureDriveWebCompatibleVideo(fileId, video, userDb) {
 
 // Transcodificador otimizado para reprodução web (PROXY e LQ)
 // Dimensionamento real de Proxy (1080p para PROXY e 720p para LQ) com aceleração por hardware (VideoToolbox no Mac)
-function transcodeStreamProxy({ input, output, isAlpha, quality }) {
+function transcodeStreamProxy({ input, output, isAlpha, quality, onProgress }) {
   let ffmpegPath = 'ffmpeg';
   try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
 
@@ -3057,7 +3093,7 @@ function transcodeStreamProxy({ input, output, isAlpha, quality }) {
 
   const runEncoder = (useHardware = isMac && !isAlpha) => {
     return new Promise((resolve, reject) => {
-      let args = ['-y', '-i', input, '-map', '0:v:0', '-map', '0:a?'];
+      let args = ['-y', '-i', input, '-progress', 'pipe:1', '-map', '0:v:0', '-map', '0:a?'];
 
       if (isAlpha) {
         // Vídeo com transparência (Alpha) -> WebM VP9 com canal alfa (yuva420p)
@@ -3150,9 +3186,65 @@ function transcodeStreamProxy({ input, output, isAlpha, quality }) {
 
       const proc = spawn(ffmpegPath, args);
       let errStr = '';
-      proc.stderr.on('data', d => errStr += d.toString());
+      let totalDurationSec = 0;
+
+      proc.stderr.on('data', d => {
+        const s = d.toString();
+        errStr += s;
+        if (!totalDurationSec) {
+          const match = s.match(/Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)/);
+          if (match) {
+            const h = parseFloat(match[1]);
+            const m = parseFloat(match[2]);
+            const sec = parseFloat(match[3]);
+            totalDurationSec = h * 3600 + m * 60 + sec;
+          }
+        }
+      });
+
+      let lastPercent = -1;
+      let lastProgressTime = 0;
+
+      proc.stdout.on('data', d => {
+        const lines = d.toString().split('\n');
+        for (const line of lines) {
+          if (line.startsWith('out_time=')) {
+            const timeStr = line.split('=')[1].trim();
+            if (!timeStr.startsWith('-')) {
+              const parts = timeStr.split(':');
+              if (parts.length === 3 && totalDurationSec > 0) {
+                const h = parseFloat(parts[0]);
+                const m = parseFloat(parts[1]);
+                const s = parseFloat(parts[2]);
+                if (!isNaN(h) && !isNaN(m) && !isNaN(s)) {
+                  const curSec = h * 3600 + m * 60 + s;
+                  if (curSec >= 0) {
+                    const pct = Math.min(99, Math.max(0, Math.round((curSec / totalDurationSec) * 100)));
+                    const now = Date.now();
+                    if (pct !== lastPercent && (now - lastProgressTime > 150 || pct === 99)) {
+                      lastPercent = pct;
+                      lastProgressTime = now;
+                      if (typeof onProgress === 'function') {
+                        onProgress(pct);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } else if (line.startsWith('progress=end')) {
+            if (typeof onProgress === 'function') {
+              onProgress(100);
+            }
+          }
+        }
+      });
+
       proc.on('close', code => {
         if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
+          if (typeof onProgress === 'function') {
+            onProgress(100);
+          }
           resolve();
         } else {
           reject(new Error(`Transcode falhou (código ${code}): ${errStr.slice(-300)}`));
@@ -3172,7 +3264,7 @@ function transcodeStreamProxy({ input, output, isAlpha, quality }) {
 }
 
 // Assegura versão otimizada (PROXY ou LQ) salva no Drive da conta conectada em .cloud_stream
-async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', project = null) {
+async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', project = null, onProgress = null) {
   let isAlpha = Boolean(video?.isAlpha);
   const ext = isAlpha ? 'webm' : 'mp4';
   const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
@@ -3180,14 +3272,17 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
   const legacyCachePath = (quality === 'proxy') ? path.join(cacheDir, `${fileId}.${ext}`) : null;
 
   if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
+    if (typeof onProgress === 'function') onProgress(100);
     return cachePath;
   }
   if (legacyCachePath && fs.existsSync(legacyCachePath) && fs.statSync(legacyCachePath).size > 0) {
+    if (typeof onProgress === 'function') onProgress(100);
     return legacyCachePath;
   }
 
   const driveKey = quality === 'lq' ? 'lqFileId' : 'proxyFileId';
   if (video?.cloudStream && video.cloudStream[driveKey]) {
+    if (typeof onProgress === 'function') onProgress(100);
     return { cloudDriveId: video.cloudStream[driveKey], isAlpha };
   }
 
@@ -3205,6 +3300,11 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
       let sourcePath = tempSource;
       if (video?.localPath && fs.existsSync(video.localPath)) {
         sourcePath = video.localPath;
+      } else if (video?.url && video.url.startsWith('/assets/')) {
+        const assetPath = path.join(__dirname, 'public', video.url);
+        if (fs.existsSync(assetPath)) {
+          sourcePath = assetPath;
+        }
       } else {
         needCleanupTemp = true;
         const stream = await driveApi.getFileStream(userDb, fileId);
@@ -3224,7 +3324,7 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
         if (video) video.isAlpha = true;
       }
 
-      await transcodeStreamProxy({ input: sourcePath, output: tempTarget, isAlpha, quality });
+      await transcodeStreamProxy({ input: sourcePath, output: tempTarget, isAlpha, quality, onProgress });
 
       if (fs.existsSync(tempTarget) && fs.statSync(tempTarget).size > 0) {
         fs.renameSync(tempTarget, cachePath);
@@ -3279,6 +3379,178 @@ async function ensureCloudStreamProxy(fileId, video, userDb, quality = 'proxy', 
   convertingWebJobs.set(jobKey, job);
   return job;
 }
+
+// ============================================================================
+// Gerenciador de Fila de Sincronização e Geração de Proxies em Segundo Plano
+// Processamento totalmente assíncrono que persiste no servidor ("nuvem")
+// ============================================================================
+class SyncQueueManager {
+  constructor() {
+    this.queue = [];
+    this.activeItem = null;
+    this.isProcessing = false;
+    this.lastBroadcastTime = 0;
+  }
+
+  getStatus() {
+    return {
+      activeItem: this.activeItem ? {
+        id: this.activeItem.id,
+        videoId: this.activeItem.videoId,
+        driveFileId: this.activeItem.driveFileId,
+        title: this.activeItem.title,
+        fileName: this.activeItem.fileName,
+        projectId: this.activeItem.projectId,
+        projectName: this.activeItem.projectName,
+        percent: this.activeItem.percent || 0,
+        status: this.activeItem.status || 'processing'
+      } : null,
+      queue: this.queue.map(item => ({
+        id: item.id,
+        videoId: item.videoId,
+        driveFileId: item.driveFileId,
+        title: item.title,
+        fileName: item.fileName,
+        projectId: item.projectId,
+        projectName: item.projectName,
+        percent: 0,
+        status: 'queued'
+      })),
+      totalCount: (this.activeItem ? 1 : 0) + this.queue.length
+    };
+  }
+
+  broadcast(force = false) {
+    const now = Date.now();
+    if (!force && now - this.lastBroadcastTime < 150) {
+      return;
+    }
+    this.lastBroadcastTime = now;
+    const status = this.getStatus();
+    broadcastNotificationEvent({
+      type: 'sync_queue_update',
+      ...status,
+      timestamp: now
+    });
+  }
+
+  enqueueVideosFromProject(project, userId) {
+    if (!project || !Array.isArray(project.videos) || !userId) return [];
+    const itemsToEnqueue = [];
+
+    for (const video of project.videos) {
+      const isImage = video.type === 'image' || (video.mimeType && video.mimeType.startsWith('image/'));
+      const isFolder = video.type === 'folder' || video.itemType === 'folder';
+      if (isImage || isFolder) continue;
+
+      const fileId = video.driveFileId || video.id;
+      if (!fileId) continue;
+
+      // Se já existe proxy no cache local ou no .cloud_stream do Drive, não enfileira
+      const cachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}_proxy.mp4`);
+      const legacyCachePath = path.join(WEB_VIDEO_CACHE_DIR, `${fileId}.mp4`);
+      const alphaCachePath = path.join(ALPHA_CACHE_DIR, `${fileId}_proxy.webm`);
+      const hasCache = (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) ||
+                       (fs.existsSync(legacyCachePath) && fs.statSync(legacyCachePath).size > 0) ||
+                       (fs.existsSync(alphaCachePath) && fs.statSync(alphaCachePath).size > 0);
+      const hasCloudProxy = Boolean(video.cloudStream && video.cloudStream.proxyFileId);
+
+      if (hasCache || hasCloudProxy) continue;
+
+      // Verifica se já está ativo ou na fila
+      const isAlreadyActive = this.activeItem && (this.activeItem.videoId === video.id || this.activeItem.driveFileId === fileId);
+      const isAlreadyQueued = this.queue.some(q => q.videoId === video.id || q.driveFileId === fileId);
+      if (isAlreadyActive || isAlreadyQueued) continue;
+
+      itemsToEnqueue.push({
+        id: `sync-${video.id}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        videoId: video.id,
+        driveFileId: fileId,
+        title: video.title || video.fileName || 'Vídeo',
+        fileName: video.fileName || video.title || '',
+        projectId: project.id,
+        projectName: project.name || '',
+        userId: userId,
+        percent: 0,
+        status: 'queued',
+        createdAt: Date.now()
+      });
+    }
+
+    if (itemsToEnqueue.length > 0) {
+      this.enqueue(itemsToEnqueue);
+    }
+    return itemsToEnqueue;
+  }
+
+  enqueue(items) {
+    const list = Array.isArray(items) ? items : [items];
+    let added = 0;
+    for (const item of list) {
+      const isAlreadyActive = this.activeItem && (this.activeItem.videoId === item.videoId || this.activeItem.driveFileId === item.driveFileId);
+      const isAlreadyQueued = this.queue.some(q => q.videoId === item.videoId || q.driveFileId === item.driveFileId);
+      if (!isAlreadyActive && !isAlreadyQueued) {
+        this.queue.push(item);
+        added++;
+      }
+    }
+    if (added > 0) {
+      this.broadcast(true);
+      this.processNext();
+    }
+  }
+
+  async processNext() {
+    if (this.isProcessing) return;
+    if (this.queue.length === 0) {
+      this.activeItem = null;
+      this.broadcast(true);
+      return;
+    }
+
+    this.isProcessing = true;
+    this.activeItem = this.queue.shift();
+    this.activeItem.status = 'processing';
+    this.activeItem.percent = 0;
+    this.broadcast(true);
+
+    const item = this.activeItem;
+    try {
+      const userDb = storage.getUserDb(item.userId);
+      const project = (userDb?.projects || []).find(p => p.id === item.projectId);
+      const video = project ? (project.videos || []).find(v => v.id === item.videoId || v.driveFileId === item.driveFileId) : null;
+
+      if (!video) {
+        console.warn(`[SyncQueue] Vídeo ${item.videoId} não encontrado no projeto ${item.projectId}`);
+      } else {
+        await ensureCloudStreamProxy(
+          item.driveFileId,
+          video,
+          userDb,
+          'proxy',
+          project,
+          (percent) => {
+            if (this.activeItem && this.activeItem.id === item.id) {
+              this.activeItem.percent = Math.min(100, Math.max(0, percent));
+              this.broadcast();
+            }
+          }
+        );
+      }
+    } catch (err) {
+      console.error(`[SyncQueue] Erro ao processar proxy para "${item.title}":`, err.message);
+    } finally {
+      // Quando o vídeo for processado, some automaticamente do botão de refresh
+      this.activeItem = null;
+      this.isProcessing = false;
+      this.broadcast(true);
+      // Processa o próximo item sequencialmente
+      setTimeout(() => this.processNext(), 100);
+    }
+  }
+}
+
+const syncQueueManager = new SyncQueueManager();
 
 // Solução 4: FastStart Automático em Segundo Plano para Arquivos Pesados (Moov Atom Fix)
 // Move o átomo moov para o byte 0 via FFmpeg stream copy (-c copy), sem reencodar nem perder qualidade

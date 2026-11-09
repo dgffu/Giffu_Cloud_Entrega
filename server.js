@@ -4076,7 +4076,7 @@ app.get('/api/stream/video-status', async (req, res) => {
 });
 
 // Endpoint para consultar o status da fila de sincronização em segundo plano
-app.get('/api/sync/queue', requireAuthor, (req, res) => {
+app.get('/api/sync/queue', (req, res) => {
   res.json({
     ok: true,
     activeItem: syncQueueManager.activeItem ? {

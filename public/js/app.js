@@ -1018,9 +1018,7 @@ class SyncQueueManagerUI {
 
     this.fetchQueue();
 
-    this.pollInterval = setInterval(() => {
-      this.fetchQueue();
-    }, 6000);
+    this.startPolling();
 
     document.addEventListener('click', (e) => {
       if (this.isOpen) {
@@ -1036,6 +1034,14 @@ class SyncQueueManagerUI {
         this.closePopover();
       }
     });
+  }
+
+  startPolling() {
+    clearInterval(this.pollInterval);
+    const interval = this.totalCount > 0 ? 1500 : 5000;
+    this.pollInterval = setInterval(() => {
+      this.fetchQueue();
+    }, interval);
   }
 
   async fetchQueue() {
@@ -1059,23 +1065,25 @@ class SyncQueueManagerUI {
 
     this.updateBadge();
 
+    const hadActive = prevCount > 0;
+    const hasActive = this.totalCount > 0;
+    if (hadActive !== hasActive) {
+      this.startPolling();
+    }
+
     if (this.isOpen) {
-      if (this.totalCount === 0) {
-        this.closePopover();
-      } else {
-        const currentActiveId = this.activeItem ? this.activeItem.id : null;
-        if (currentActiveId && currentActiveId === prevActiveId && prevCount === this.totalCount) {
-          const pctEl = document.getElementById('syncActivePercentText');
-          const barEl = document.getElementById('syncActiveProgressBar');
-          if (pctEl && barEl) {
-            const pct = Math.min(100, Math.max(0, this.activeItem.percent || 0));
-            pctEl.textContent = `${pct}%`;
-            barEl.style.width = `${pct}%`;
-            return;
-          }
+      const currentActiveId = this.activeItem ? this.activeItem.id : null;
+      if (currentActiveId && currentActiveId === prevActiveId && prevCount === this.totalCount) {
+        const pctEl = document.getElementById('syncActivePercentText');
+        const barEl = document.getElementById('syncActiveProgressBar');
+        if (pctEl && barEl) {
+          const pct = Math.min(100, Math.max(0, this.activeItem.percent || 0));
+          pctEl.textContent = `${pct}%`;
+          barEl.style.width = `${pct}%`;
+          return;
         }
-        this.renderPopoverList();
       }
+      this.renderPopoverList();
     }
   }
 
@@ -1208,7 +1216,7 @@ class SyncQueueManagerUI {
     if (this.activeItem) {
       const pct = Math.min(100, Math.max(0, this.activeItem.percent || 0));
       html += `
-        <div class="sync-item is-active" data-project-id="${this.app.escapeHtml(this.activeItem.projectId)}" data-video-id="${this.app.escapeHtml(this.activeItem.videoId)}" title="Clique para abrir e reproduzir no player">
+        <div class="sync-item is-active">
           <div class="sync-item-top">
             <div class="sync-item-title-group">
               <svg class="sync-item-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
@@ -1222,8 +1230,7 @@ class SyncQueueManagerUI {
             <div class="sync-progress-fill" id="syncActiveProgressBar" style="width: ${pct}%; background-color: ${brandColor};"></div>
           </div>
           <div class="sync-item-meta">
-            <span class="sync-item-status">Processando rendição...</span>
-            <span class="sync-item-open-hint">Clique para reproduzir</span>
+            <span class="sync-item-status">Processando na nuvem (${pct}%)</span>
           </div>
         </div>
       `;
@@ -1231,11 +1238,12 @@ class SyncQueueManagerUI {
 
     for (const item of this.queue) {
       html += `
-        <div class="sync-item is-queued" data-project-id="${this.app.escapeHtml(item.projectId)}" data-video-id="${this.app.escapeHtml(item.videoId)}" title="Clique para abrir e reproduzir">
+        <div class="sync-item is-queued">
           <div class="sync-item-top">
             <div class="sync-item-title-group">
-              <svg class="sync-item-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              <svg class="sync-item-play-icon sync-item-queued-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 7v5l3 3" stroke-linecap="round"/>
               </svg>
               <span class="sync-item-name" title="${this.app.escapeHtml(item.title)}">${this.app.escapeHtml(item.title)}</span>
             </div>
@@ -1246,25 +1254,12 @@ class SyncQueueManagerUI {
           </div>
           <div class="sync-item-meta">
             <span class="sync-item-status">Na fila</span>
-            <span class="sync-item-open-hint">Clique para reproduzir</span>
           </div>
         </div>
       `;
     }
 
     listEl.innerHTML = html;
-
-    listEl.querySelectorAll('.sync-item').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const projId = el.getAttribute('data-project-id');
-        const vidId = el.getAttribute('data-video-id');
-        if (projId && vidId && this.app) {
-          this.app.openVideoFromSync(projId, vidId);
-        }
-      });
-    });
   }
 }
 
@@ -1950,6 +1945,7 @@ class EntregaApp {
     this.authorSession = this.loadAuthorSession();
     await this.fetchData();
     this.initNotificationsManager();
+    this.initSyncQueueManager();
     this.detectRoute();
     this.bindGlobalEvents();
     this.setupCategoryContextMenu();

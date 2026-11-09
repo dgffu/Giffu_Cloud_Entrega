@@ -7974,7 +7974,8 @@ body.video-fullscreen-active .mobile-portrait-guard {
   border-radius: 10px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-subtle);
-  cursor: pointer;
+  cursor: default;
+  user-select: none;
   transition: all var(--transition-fast);
   display: flex;
   flex-direction: column;
@@ -7983,9 +7984,7 @@ body.video-fullscreen-active .mobile-portrait-guard {
 }
 
 .sync-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--brand-orange, #ff5400);
-  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .sync-item-top {

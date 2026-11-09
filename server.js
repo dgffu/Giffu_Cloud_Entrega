@@ -10,6 +10,15 @@ const { ZipArchive } = require('archiver');
 
 const uploadTempDir = path.join(os.tmpdir(), 'giffu-entrega-uploads');
 try { fs.mkdirSync(uploadTempDir, { recursive: true }); } catch (e) {}
+
+// Limpa arquivos temporários antigos deixados em /tmp por reinicializações do container para recuperar espaço em disco
+try {
+  const tmpFiles = fs.readdirSync(uploadTempDir);
+  for (const f of tmpFiles) {
+    try { fs.unlinkSync(path.join(uploadTempDir, f)); } catch (e) {}
+  }
+} catch (e) {}
+
 const upload = multer({
   dest: uploadTempDir,
   limits: { fileSize: 10 * 1024 * 1024 * 1024 } // 10 GB
@@ -2955,6 +2964,72 @@ try { fs.mkdirSync(ALPHA_CACHE_DIR, { recursive: true }); } catch (e) {}
 const WEB_VIDEO_CACHE_DIR = path.join(APP_DATA_DIR, 'web_cache');
 try { fs.mkdirSync(WEB_VIDEO_CACHE_DIR, { recursive: true }); } catch (e) {}
 
+// Limpeza automática de cache LRU para impedir estouro de espaço em disco (ENOSPC) em volumes Railway
+function pruneCacheDir(dirPath, maxBytes = 250 * 1024 * 1024) {
+  try {
+    if (!fs.existsSync(dirPath)) return;
+    const entries = fs.readdirSync(dirPath).map(name => {
+      const full = path.join(dirPath, name);
+      try {
+        const stat = fs.statSync(full);
+        return { name, path: full, size: stat.size, mtime: stat.mtimeMs };
+      } catch (e) {
+        return null;
+      }
+    }).filter(Boolean);
+
+    let totalSize = entries.reduce((acc, e) => acc + e.size, 0);
+    if (totalSize <= maxBytes) return;
+
+    // Remove arquivos mais antigos primeiro (LRU)
+    entries.sort((a, b) => a.mtime - b.mtime);
+    const targetSize = Math.round(maxBytes * 0.7);
+
+    for (const file of entries) {
+      if (totalSize <= targetSize) break;
+      try {
+        fs.unlinkSync(file.path);
+        totalSize -= file.size;
+        console.log(`[CachePrune] Liberado espaço removendo cache antigo: ${file.name} (${Math.round(file.size / (1024 * 1024))}MB)`);
+      } catch (e) {}
+    }
+  } catch (err) {
+    console.warn('[CachePrune] Aviso ao podar cache:', err.message);
+  }
+}
+
+// Move arquivos entre sistemas de arquivos diferentes de forma segura (previne EXDEV e trata ENOSPC com poda automática)
+function safeMoveFile(src, dest) {
+  try {
+    fs.renameSync(src, dest);
+  } catch (err) {
+    if (err.code === 'EXDEV' || err.code === 'EPERM') {
+      try {
+        fs.copyFileSync(src, dest);
+        try { fs.unlinkSync(src); } catch (e) {}
+      } catch (copyErr) {
+        if (copyErr.code === 'ENOSPC') {
+          pruneCacheDir(WEB_VIDEO_CACHE_DIR, 200 * 1024 * 1024);
+          pruneCacheDir(ALPHA_CACHE_DIR, 50 * 1024 * 1024);
+          fs.copyFileSync(src, dest);
+          try { fs.unlinkSync(src); } catch (e) {}
+        } else {
+          throw copyErr;
+        }
+      }
+    } else if (err.code === 'ENOSPC') {
+      pruneCacheDir(WEB_VIDEO_CACHE_DIR, 200 * 1024 * 1024);
+      fs.renameSync(src, dest);
+    } else {
+      throw err;
+    }
+  }
+}
+
+// Poda inicial preventiva do cache na inicialização
+pruneCacheDir(WEB_VIDEO_CACHE_DIR, 350 * 1024 * 1024);
+pruneCacheDir(ALPHA_CACHE_DIR, 100 * 1024 * 1024);
+
 const convertingAlphaJobs = new Map();
 const convertingWebJobs = new Map();
 
@@ -3066,7 +3141,7 @@ async function ensureLocalWebCompatibleVideo(filePath) {
       try {
         await transcodeVideoToH264(filePath, tempTarget);
         if (fs.existsSync(tempTarget)) {
-          fs.renameSync(tempTarget, cachePath);
+          safeMoveFile(tempTarget, cachePath);
           return cachePath;
         }
         return null;
@@ -3359,13 +3434,17 @@ async function ensureCloudStreamRendition(fileId, video, userDb, rendition = '10
     const tempSource = path.join(uploadTempDir, `src_${fileId}_${Date.now()}.raw`);
     const tempTarget = path.join(uploadTempDir, `out_${fileId}_${rendition}_${Date.now()}.${ext}`);
 
+    let sourcePath = tempSource;
+    let shouldDeleteSource = false;
+
     try {
       if (onProgress) onProgress(5);
       if (video?.localPath && fs.existsSync(video.localPath)) {
-        fs.copyFileSync(video.localPath, tempSource);
+        sourcePath = video.localPath;
       } else if (fileId && typeof fileId === 'string' && fs.existsSync(fileId)) {
-        fs.copyFileSync(fileId, tempSource);
+        sourcePath = fileId;
       } else {
+        shouldDeleteSource = true;
         const stream = await driveApi.getFileStream(userDb, fileId);
         const ws = fs.createWriteStream(tempSource);
         stream.pipe(ws);
@@ -3378,9 +3457,9 @@ async function ensureCloudStreamRendition(fileId, video, userDb, rendition = '10
       if (onProgress) onProgress(20);
 
       // Sonda informações do vídeo
-      const vInfo = await probeVideoInfo(tempSource);
+      const vInfo = await probeVideoInfo(sourcePath);
 
-      await transcodeFrameIoRendition(tempSource, tempTarget, targetHeight, vInfo.isAlpha || isAlpha, vInfo.duration, (pct) => {
+      await transcodeFrameIoRendition(sourcePath, tempTarget, targetHeight, vInfo.isAlpha || isAlpha, vInfo.duration, (pct) => {
         const mappedPct = Math.round(20 + (pct * 0.65));
         if (onProgress) onProgress(mappedPct);
       });
@@ -3389,19 +3468,36 @@ async function ensureCloudStreamRendition(fileId, video, userDb, rendition = '10
         throw new Error('Arquivo de transcode não foi gerado ou está vazio');
       }
 
-      // Salva no cache local do servidor
-      fs.copyFileSync(tempTarget, cachePath);
-      persistCloudStreamId(userDb.user.id, project?.id, video?.id, rendition, 'cached');
+      // Salva no cache local do servidor com proteção contra ENOSPC e EXDEV
+      let savedLocalCache = false;
+      try {
+        safeMoveFile(tempTarget, cachePath);
+        savedLocalCache = true;
+        persistCloudStreamId(userDb.user.id, project?.id, video?.id, rendition, 'cached');
+      } catch (cacheErr) {
+        console.warn(`[CloudStream] Aviso no cache local (${cacheErr.code || cacheErr.message}):`, cacheErr.message);
+        if (fs.existsSync(tempTarget)) {
+          try {
+            pruneCacheDir(WEB_VIDEO_CACHE_DIR, 150 * 1024 * 1024);
+            safeMoveFile(tempTarget, cachePath);
+            savedLocalCache = true;
+            persistCloudStreamId(userDb.user.id, project?.id, video?.id, rendition, 'cached');
+          } catch (retryErr) {
+            console.warn('[CloudStream] Não foi possível salvar em cache local, prosseguindo com upload direto para o Drive');
+          }
+        }
+      }
       if (onProgress) onProgress(88);
 
       // 4. Faz upload para a pasta .cloud_stream do Google Drive se o token estiver disponível
       let uploadedFileId = null;
-      if (cloudStreamFolder && cloudStreamFolder.id) {
+      const fileToUpload = savedLocalCache && fs.existsSync(cachePath) ? cachePath : tempTarget;
+      if (cloudStreamFolder && cloudStreamFolder.id && fs.existsSync(fileToUpload)) {
         try {
           const uploadRes = await driveApi.uploadFileToFolder(
             userDb,
             cloudStreamFolder.id,
-            tempTarget,
+            fileToUpload,
             `stream_${rendition}_${fileId}.${ext}`,
             isAlpha ? 'video/webm' : 'video/mp4'
           );
@@ -3415,12 +3511,14 @@ async function ensureCloudStreamRendition(fileId, video, userDb, rendition = '10
       }
       if (onProgress) onProgress(100);
 
-      return uploadedFileId ? { cloudDriveId: uploadedFileId } : cachePath;
+      return uploadedFileId ? { cloudDriveId: uploadedFileId } : (savedLocalCache ? cachePath : null);
     } catch (err) {
       console.error(`[CloudStream] Erro ao gerar rendição ${rendition} de ${fileId}:`, err.message);
       return null;
     } finally {
-      try { if (fs.existsSync(tempSource)) fs.unlinkSync(tempSource); } catch (e) {}
+      if (shouldDeleteSource) {
+        try { if (fs.existsSync(tempSource)) fs.unlinkSync(tempSource); } catch (e) {}
+      }
       try { if (fs.existsSync(tempTarget)) fs.unlinkSync(tempTarget); } catch (e) {}
       convertingCloudStreamJobs.delete(jobKey);
     }
@@ -3579,7 +3677,7 @@ async function ensureDriveWebCompatibleVideo(fileId, video, userDb) {
 
       await transcodeVideoToH264(tempSource, tempTarget);
       if (fs.existsSync(tempTarget)) {
-        fs.renameSync(tempTarget, cachePath);
+        safeMoveFile(tempTarget, cachePath);
         return cachePath;
       }
       return null;
@@ -3687,7 +3785,7 @@ function ensureDriveFastStartBackground(fileId, video, userDb) {
 
       await applyFastStartToMp4(tempSource, tempTarget);
       if (fs.existsSync(tempTarget) && fs.statSync(tempTarget).size > 0) {
-        fs.renameSync(tempTarget, cachePath);
+        safeMoveFile(tempTarget, cachePath);
       }
     } catch (err) {
       console.warn(`[FastStart] Não foi possível aplicar faststart para (${fileId}):`, err.message);
@@ -3718,7 +3816,7 @@ function ensureLocalFastStartBackground(filePath, fileKey) {
     try {
       await applyFastStartToMp4(filePath, tempTarget);
       if (fs.existsSync(tempTarget) && fs.statSync(tempTarget).size > 0) {
-        fs.renameSync(tempTarget, cachePath);
+        safeMoveFile(tempTarget, cachePath);
       }
     } catch (err) {
       console.warn(`[FastStart] Não foi possível aplicar faststart local (${fileKey}):`, err.message);
@@ -3882,7 +3980,7 @@ async function ensureAlphaWebm(fileId, video, userDb) {
 
       await runFfmpeg(sourcePath, tempTarget);
 
-      fs.renameSync(tempTarget, cachePath);
+      safeMoveFile(tempTarget, cachePath);
       return cachePath;
     } finally {
       try { if (fs.existsSync(tempSource)) fs.unlinkSync(tempSource); } catch (e) {}
@@ -4493,7 +4591,7 @@ app.get('/api/stream', async (req, res) => {
           });
           proc.on('error', reject);
         });
-        fs.renameSync(tempTarget, cachePath);
+        safeMoveFile(tempTarget, cachePath);
         return streamLocalRangeFile(req, res, cachePath, 'video/webm');
       }
     } catch (e) {

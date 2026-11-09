@@ -410,6 +410,32 @@ class CustomVideoPlayer {
     return str || '1080p';
   }
 
+  getQualityLabels() {
+    const w = this.video?.videoWidth || Number(this.videoData.width) || 0;
+    const h = this.video?.videoHeight || Number(this.videoData.height) || 0;
+    const minDim = (w && h) ? Math.min(w, h) : (this.videoData.resolution === '4K' ? 2160 : (this.videoData.resolution === 'FHD' ? 1080 : 720));
+    const maxDim = (w && h) ? Math.max(w, h) : (this.videoData.resolution === '4K' ? 3840 : (this.videoData.resolution === 'FHD' ? 1920 : 1280));
+
+    let originalLabel = '1080p';
+    let proxyLabel = '1080p';
+
+    if (minDim >= 1440 || maxDim >= 2500 || this.videoData.resolution === '4K' || this.videoData.resolution === 'ULTRA') {
+      originalLabel = '4K';
+      proxyLabel = '1080p';
+    } else if (minDim > 720 || maxDim > 1280 || this.videoData.resolution === 'FHD') {
+      originalLabel = '1080p';
+      proxyLabel = '1080p';
+    } else if (minDim > 540 || maxDim > 960 || this.videoData.resolution === 'HD') {
+      originalLabel = '720p';
+      proxyLabel = '720p';
+    } else if (minDim > 0) {
+      originalLabel = `${minDim}p`;
+      proxyLabel = `${minDim}p`;
+    }
+
+    return { originalLabel, proxyLabel };
+  }
+
   getResolutionInfo() {
     const w = this.video?.videoWidth || Number(this.videoData.width) || 0;
     const h = this.video?.videoHeight || Number(this.videoData.height) || 0;
@@ -422,30 +448,24 @@ class CustomVideoPlayer {
   }
 
   updateSettingsUI() {
-    const resInfo = this.getResolutionInfo();
+    const { originalLabel, proxyLabel } = this.getQualityLabels();
     const gearBadge = this.container.querySelector('#playerGearBadge');
     const qualityText = this.container.querySelector('#settingsCurrentQualityText');
 
-    let badgeText = 'HD';
-    let currentText = '1080p HD';
+    let badgeText = originalLabel === '4K' ? '4K' : (['1080p', '720p'].includes(originalLabel) ? 'HD' : '');
+    let currentText = `Original (${originalLabel})`;
 
-    if (this.currentQuality === 'original') {
-      badgeText = resInfo.formatName === '4K' ? '4K' : (['1080p', '720p'].includes(resInfo.formatName) ? 'HD' : 'SD');
-      currentText = `Original (${resInfo.formatName})`;
-    } else if (this.currentQuality === '1080p') {
-      badgeText = 'HD';
-      currentText = '1080p HD';
-    } else if (this.currentQuality === '720p') {
-      badgeText = 'HD';
-      currentText = '720p HD';
-    } else if (this.currentQuality === '360p') {
-      badgeText = 'SD';
-      currentText = '360p SD';
+    if (this.currentQuality === 'proxy') {
+      badgeText = ['1080p', '720p'].includes(proxyLabel) ? 'HD' : 'SD';
+      currentText = `Proxy (${proxyLabel})`;
     }
 
-    if (gearBadge) gearBadge.textContent = badgeText;
+    if (gearBadge) {
+      gearBadge.textContent = badgeText || 'HD';
+      gearBadge.style.display = badgeText ? 'inline-block' : 'none';
+    }
     if (qualityText) qualityText.textContent = currentText;
-    if (this.qualityBadgeText) this.qualityBadgeText.textContent = resInfo.rawLabel;
+    if (this.qualityBadgeText) this.qualityBadgeText.textContent = originalLabel;
 
     this.renderQualitySubmenu();
   }
@@ -454,21 +474,20 @@ class CustomVideoPlayer {
     const listEl = this.container.querySelector('#settingsQualityOptionsList');
     if (!listEl) return;
 
-    const resInfo = this.getResolutionInfo();
-    const maxDim = Math.max(resInfo.width, resInfo.height);
-    const minDim = Math.min(resInfo.width, resInfo.height);
+    const { originalLabel, proxyLabel } = this.getQualityLabels();
 
     const options = [
-      { id: 'original', name: `Original (${resInfo.formatName})`, tag: '' }
+      {
+        id: 'original',
+        name: `Original (${originalLabel})`,
+        tag: originalLabel === '4K' ? '4K' : (['1080p', '720p'].includes(originalLabel) ? 'HD' : '')
+      },
+      {
+        id: 'proxy',
+        name: `Proxy (${proxyLabel})`,
+        tag: ['1080p', '720p'].includes(proxyLabel) ? 'HD' : 'SD'
+      }
     ];
-
-    if (minDim >= 900 || maxDim >= 1800 || minDim === 0) {
-      options.push({ id: '1080p', name: '1080p', tag: 'HD' });
-    }
-    if (minDim >= 600 || maxDim >= 1100 || minDim === 0) {
-      options.push({ id: '720p', name: '720p', tag: 'HD' });
-    }
-    options.push({ id: '360p', name: '360p', tag: 'SD' });
 
     let html = '';
     for (const opt of options) {

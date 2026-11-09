@@ -3386,139 +3386,172 @@ function persistCloudStreamId(userId, projectId, videoId, rendition, cloudFileId
   }
 }
 
-async function ensureCloudStreamRendition(fileId, video, userDb, rendition = '1080p', project = null, onProgress = null) {
-  const targetHeight = rendition === '720p' ? 720 : (rendition === '360p' ? 360 : 1080);
-  const isAlpha = Boolean(video?.isAlpha);
-  const ext = isAlpha ? 'webm' : 'mp4';
-  const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
-  const cachePath = path.join(cacheDir, `${fileId}_${rendition}.${ext}`);
+function transcodeDirectStreamToProxy(driveUrl, token, outputPath, targetHeight, duration, onProgress) {
+  let ffmpegPath = 'ffmpeg';
+  try { ffmpegPath = require('ffmpeg-static') || 'ffmpeg'; } catch (e) {}
 
-  if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
-    if (onProgress) onProgress(100);
-    return cachePath;
+  return runWithTranscodeLock(() => {
+    return new Promise((resolve, reject) => {
+      const scaleFilter = `scale=min(1920\\,iw):-2`;
+
+      // Lê diretamente do stream HTTP do Google Drive (Zero download do original no disco!)
+      const args = [
+        '-y',
+        '-headers', `Authorization: Bearer ${token}\r\n`,
+        '-i', driveUrl,
+        '-map', '0:v:0',
+        '-map', '0:a?',
+        '-vf', scaleFilter,
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-tune', 'fastdecode',
+        '-threads', '2',
+        '-x264-params', 'threads=2:lookahead-threads=1:rc-lookahead=10:sync-lookahead=0',
+        '-crf', '28',
+        '-maxrate', '2500k',
+        '-bufsize', '4000k',
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ac', '2',
+        '-movflags', '+faststart',
+        outputPath
+      ];
+
+      const proc = spawn(ffmpegPath, args);
+      let errStr = '';
+
+      proc.stderr.on('data', d => {
+        const text = d.toString();
+        errStr += text;
+        if (onProgress && duration > 0) {
+          const timeMatch = text.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+          if (timeMatch) {
+            const secs = parseInt(timeMatch[1], 10) * 3600 + parseInt(timeMatch[2], 10) * 60 + parseFloat(timeMatch[3]);
+            const pct = Math.min(99, Math.max(1, Math.round((secs / duration) * 100)));
+            onProgress(pct);
+          }
+        }
+      });
+
+      proc.on('close', code => {
+        if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+          if (onProgress) onProgress(100);
+          resolve();
+        } else {
+          reject(new Error(`FFmpeg stream transcode falhou (código ${code}): ${errStr.slice(-250)}`));
+        }
+      });
+
+      proc.on('error', reject);
+    });
+  });
+}
+
+async function ensureCloudStreamProxy(fileId, video, userDb, project = null, onProgress = null) {
+  // 1. Já está registrado no banco de dados?
+  if (video?.cloudStream?.renditions?.proxy || video?.cloudStream?.renditions?.['1080p']) {
+    if (onProgress) onProgress(100, 'Concluído');
+    return { cloudDriveId: video.cloudStream.renditions.proxy || video.cloudStream.renditions['1080p'] };
   }
 
-  // 1. Verifica se já está registrado no banco de dados
-  if (video?.cloudStream?.renditions?.[rendition]) {
-    if (onProgress) onProgress(100);
-    return { cloudDriveId: video.cloudStream.renditions[rendition] };
-  }
+  // 2. Determina a resolução do proxy
+  const w = Number(video?.width) || 0;
+  const h = Number(video?.height) || 0;
+  const minDim = (w && h) ? Math.min(w, h) : (video?.resolution === '4K' ? 2160 : (video?.resolution === 'FHD' ? 1080 : 720));
+  const targetHeight = minDim > 720 ? 1080 : (minDim > 0 ? minDim : 720);
 
-  // 2. Se temos a pasta pai, verifica se o arquivo já existe na pasta .cloud_stream do Drive
+  // 3. Procura arquivo existente na pasta .cloud_stream do Drive
   let cloudStreamFolder = null;
   const parentFolderId = video?.driveFolderId || project?.driveFolderId;
   if (parentFolderId) {
     try {
       cloudStreamFolder = await driveApi.getOrCreateCloudStreamFolder(userDb, parentFolderId);
       if (cloudStreamFolder && cloudStreamFolder.id) {
-        const streamFileName = `stream_${rendition}_${fileId}.${ext}`;
+        const streamFileName = `stream_proxy_${fileId}.mp4`;
         const existingDriveFile = await driveApi.findStreamFileInDrive(userDb, cloudStreamFolder.id, streamFileName);
         if (existingDriveFile && existingDriveFile.id) {
-          persistCloudStreamId(userDb.user.id, project?.id, video?.id, rendition, existingDriveFile.id);
-          if (onProgress) onProgress(100);
+          persistCloudStreamId(userDb.user.id, project?.id, video?.id, 'proxy', existingDriveFile.id);
+          if (onProgress) onProgress(100, 'Concluído');
           return { cloudDriveId: existingDriveFile.id };
         }
       }
     } catch (err) {
-      console.warn(`[CloudStream] Aviso ao buscar .cloud_stream no Drive:`, err.message);
+      console.warn('[CloudStream] Aviso ao buscar .cloud_stream no Drive:', err.message);
     }
   }
 
-  // 3. Transcodifica localmente
-  const jobKey = `${fileId}_${rendition}`;
+  // 4. Se o vídeo já é um MP4 leve <= 1080p e compatível com web, o próprio arquivo original atua como proxy na nuvem
+  const isMp4 = (video?.mimeType === 'video/mp4') || String(video?.fileName || '').toLowerCase().endsWith('.mp4');
+  if (isMp4 && !video?.isAlpha && targetHeight <= 1080 && (!video?.resolution || video?.resolution === 'FHD' || video?.resolution === 'HD' || video?.resolution === 'SD')) {
+    persistCloudStreamId(userDb.user.id, project?.id, video?.id, 'proxy', fileId);
+    if (onProgress) onProgress(100, 'Concluído');
+    return { cloudDriveId: fileId };
+  }
+
+  // 5. Transcodificação via stream HTTP direto (Zero bytes de source no disco!)
+  const jobKey = `proxy_${fileId}`;
   if (convertingCloudStreamJobs.has(jobKey)) {
     return convertingCloudStreamJobs.get(jobKey);
   }
 
   const job = (async () => {
-    const tempSource = path.join(uploadTempDir, `src_${fileId}_${Date.now()}.raw`);
-    const tempTarget = path.join(uploadTempDir, `out_${fileId}_${rendition}_${Date.now()}.${ext}`);
-
-    let sourcePath = tempSource;
-    let shouldDeleteSource = false;
+    // Arquivo temporário leve no os.tmpdir() (apagado logo após envio para o Drive)
+    const tempTarget = path.join(uploadTempDir, `out_proxy_${fileId}_${Date.now()}.mp4`);
 
     try {
-      if (onProgress) onProgress(5);
-      if (video?.localPath && fs.existsSync(video.localPath)) {
-        sourcePath = video.localPath;
-      } else if (fileId && typeof fileId === 'string' && fs.existsSync(fileId)) {
-        sourcePath = fileId;
-      } else {
-        shouldDeleteSource = true;
-        const stream = await driveApi.getFileStream(userDb, fileId);
-        const ws = fs.createWriteStream(tempSource);
-        stream.pipe(ws);
-        await new Promise((resolve, reject) => {
-          ws.on('finish', resolve);
-          ws.on('error', reject);
-          stream.on('error', reject);
-        });
+      if (onProgress) onProgress(5, 'Conectando ao stream da nuvem...');
+
+      const token = await google.getDriveAccessToken(userDb);
+      const driveUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+
+      let duration = 0;
+      if (video?.duration) {
+        const parts = String(video.duration).split(':').map(Number);
+        if (parts.length === 3) duration = parts[0] * 3600 + parts[1] * 60 + parts[2];
+        else if (parts.length === 2) duration = parts[0] * 60 + parts[1];
       }
-      if (onProgress) onProgress(20);
 
-      // Sonda informações do vídeo
-      const vInfo = await probeVideoInfo(sourcePath);
+      if (onProgress) onProgress(15, 'Processando proxy na nuvem (15%)...');
 
-      await transcodeFrameIoRendition(sourcePath, tempTarget, targetHeight, vInfo.isAlpha || isAlpha, vInfo.duration, (pct) => {
-        const mappedPct = Math.round(20 + (pct * 0.65));
-        if (onProgress) onProgress(mappedPct);
+      await transcodeDirectStreamToProxy(driveUrl, token, tempTarget, targetHeight, duration, (pct) => {
+        const mappedPct = Math.round(15 + (pct * 0.70));
+        if (onProgress) onProgress(mappedPct, `Processando proxy na nuvem (${mappedPct}%)...`);
       });
 
       if (!fs.existsSync(tempTarget) || fs.statSync(tempTarget).size === 0) {
-        throw new Error('Arquivo de transcode não foi gerado ou está vazio');
+        throw new Error('Arquivo de proxy não foi gerado ou está vazio');
       }
 
-      // Salva no cache local do servidor com proteção contra ENOSPC e EXDEV
-      let savedLocalCache = false;
-      try {
-        safeMoveFile(tempTarget, cachePath);
-        savedLocalCache = true;
-        persistCloudStreamId(userDb.user.id, project?.id, video?.id, rendition, 'cached');
-      } catch (cacheErr) {
-        console.warn(`[CloudStream] Aviso no cache local (${cacheErr.code || cacheErr.message}):`, cacheErr.message);
-        if (fs.existsSync(tempTarget)) {
-          try {
-            pruneCacheDir(WEB_VIDEO_CACHE_DIR, 150 * 1024 * 1024);
-            safeMoveFile(tempTarget, cachePath);
-            savedLocalCache = true;
-            persistCloudStreamId(userDb.user.id, project?.id, video?.id, rendition, 'cached');
-          } catch (retryErr) {
-            console.warn('[CloudStream] Não foi possível salvar em cache local, prosseguindo com upload direto para o Drive');
-          }
-        }
-      }
-      if (onProgress) onProgress(88);
+      if (onProgress) onProgress(88, 'Salvando proxy no Google Drive...');
 
-      // 4. Faz upload para a pasta .cloud_stream do Google Drive se o token estiver disponível
       let uploadedFileId = null;
-      const fileToUpload = savedLocalCache && fs.existsSync(cachePath) ? cachePath : tempTarget;
-      if (cloudStreamFolder && cloudStreamFolder.id && fs.existsSync(fileToUpload)) {
+      if (cloudStreamFolder && cloudStreamFolder.id) {
         try {
           const uploadRes = await driveApi.uploadFileToFolder(
             userDb,
             cloudStreamFolder.id,
-            fileToUpload,
-            `stream_${rendition}_${fileId}.${ext}`,
-            isAlpha ? 'video/webm' : 'video/mp4'
+            tempTarget,
+            `stream_proxy_${fileId}.mp4`,
+            'video/mp4'
           );
           if (uploadRes && uploadRes.id) {
             uploadedFileId = uploadRes.id;
-            persistCloudStreamId(userDb.user.id, project?.id, video?.id, rendition, uploadedFileId);
+            persistCloudStreamId(userDb.user.id, project?.id, video?.id, 'proxy', uploadedFileId);
+            console.log(`[CloudStream] Proxy de ${fileId} salvo no Drive .cloud_stream: ${uploadedFileId}`);
           }
         } catch (uploadErr) {
-          console.warn(`[CloudStream] Aviso no upload para o Drive:`, uploadErr.message);
+          console.warn('[CloudStream] Erro no upload do proxy para o Drive:', uploadErr.message);
         }
       }
-      if (onProgress) onProgress(100);
 
-      return uploadedFileId ? { cloudDriveId: uploadedFileId } : (savedLocalCache ? cachePath : null);
+      if (onProgress) onProgress(100, 'Concluído');
+      return uploadedFileId ? { cloudDriveId: uploadedFileId } : null;
     } catch (err) {
-      console.error(`[CloudStream] Erro ao gerar rendição ${rendition} de ${fileId}:`, err.message);
+      console.error(`[CloudStream] Erro ao gerar proxy de ${fileId}:`, err.message);
       return null;
     } finally {
-      if (shouldDeleteSource) {
-        try { if (fs.existsSync(tempSource)) fs.unlinkSync(tempSource); } catch (e) {}
-      }
+      // Deleta o arquivo temporário de imediato: ZERO persistência no disco do servidor ou do desenvolvedor
       try { if (fs.existsSync(tempTarget)) fs.unlinkSync(tempTarget); } catch (e) {}
       convertingCloudStreamJobs.delete(jobKey);
     }
@@ -3526,6 +3559,10 @@ async function ensureCloudStreamRendition(fileId, video, userDb, rendition = '10
 
   convertingCloudStreamJobs.set(jobKey, job);
   return job;
+}
+
+async function ensureCloudStreamRendition(fileId, video, userDb, rendition = 'proxy', project = null, onProgress = null) {
+  return ensureCloudStreamProxy(fileId, video, userDb, project, onProgress);
 }
 
 // Gerenciador da Fila de Sincronização em Segundo Plano (Background Cloud Sync)
@@ -3554,13 +3591,8 @@ class SyncQueueManager {
       const fileId = v.driveFileId || (v.url && (v.url.match(/drive=([a-zA-Z0-9_-]+)/) || [])[1]) || v.localPath || v.id;
       if (!fileId) continue;
 
-      // Se já tem rendição 1080p registrada no cloudStream ou no cache local, já está processado
-      if (v.cloudStream && v.cloudStream.renditions && v.cloudStream.renditions['1080p']) {
-        continue;
-      }
-      const cacheDir = v.isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
-      const extR = v.isAlpha ? 'webm' : 'mp4';
-      if (fs.existsSync(path.join(cacheDir, `${fileId}_1080p.${extR}`))) {
+      // Se já tem proxy registrado no cloudStream, já está processado
+      if (v.cloudStream && v.cloudStream.renditions && (v.cloudStream.renditions['proxy'] || v.cloudStream.renditions['1080p'])) {
         continue;
       }
 
@@ -3578,6 +3610,7 @@ class SyncQueueManager {
         fileName: v.fileName || `${v.title || 'video'}.mp4`,
         isAlpha: Boolean(v.isAlpha),
         percent: 0,
+        statusText: 'Na fila da nuvem',
         userId
       });
       addedAny = true;
@@ -3597,14 +3630,16 @@ class SyncQueueManager {
         projectId: this.activeItem.projectId,
         videoId: this.activeItem.videoId,
         title: this.activeItem.title,
-        percent: this.activeItem.percent || 0
+        percent: this.activeItem.percent || 0,
+        statusText: this.activeItem.statusText || 'Processando proxy na nuvem...'
       } : null,
       queue: this.queue.map(item => ({
         id: item.id,
         projectId: item.projectId,
         videoId: item.videoId,
         title: item.title,
-        percent: 0
+        percent: 0,
+        statusText: 'Na fila da nuvem'
       })),
       totalCount: (this.activeItem ? 1 : 0) + this.queue.length
     });
@@ -3615,6 +3650,7 @@ class SyncQueueManager {
     this.isProcessing = true;
     this.activeItem = this.queue.shift();
     this.activeItem.percent = 0;
+    this.activeItem.statusText = 'Conectando ao stream da nuvem...';
     this.broadcastState();
 
     try {
@@ -3624,15 +3660,16 @@ class SyncQueueManager {
       const video = project ? (project.videos || []).find(v => v.id === item.videoId) : null;
 
       if (video) {
-        await ensureCloudStreamRendition(item.fileId, video, userDb, '1080p', project, (pct) => {
+        await ensureCloudStreamProxy(item.fileId, video, userDb, project, (pct, statusText) => {
           if (this.activeItem && this.activeItem.fileId === item.fileId) {
             this.activeItem.percent = pct;
+            if (statusText) this.activeItem.statusText = statusText;
             this.broadcastState();
           }
         });
       }
     } catch (err) {
-      console.warn(`[SyncQueue] Erro ao processar rendição de ${this.activeItem?.title}:`, err.message);
+      console.warn(`[SyncQueue] Erro ao processar proxy de ${this.activeItem?.title}:`, err.message);
     } finally {
       this.activeItem = null;
       this.isProcessing = false;
@@ -4100,22 +4137,14 @@ app.get('/api/stream/video-status', async (req, res) => {
       return res.json({ ready: true, converting: false, quality: 'original' });
     }
 
-    // Rendição específica (ex: 1080p, 720p, 360p)
-    const isAlpha = Boolean(found.video?.isAlpha);
-    const ext = isAlpha ? 'webm' : 'mp4';
-    const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
-    const cachePath = path.join(cacheDir, `${fileId}_${quality}.${ext}`);
-
-    if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
-      return res.json({ ready: true, percent: 100, converting: false, quality });
-    }
-    if (found.video?.cloudStream?.renditions?.[quality]) {
+    // Rendição Proxy / específica (ex: proxy, 1080p, 720p)
+    if (found.video?.cloudStream?.renditions?.[quality] || found.video?.cloudStream?.renditions?.proxy || found.video?.cloudStream?.renditions?.['1080p']) {
       return res.json({ ready: true, percent: 100, converting: false, quality });
     }
 
     // Verifica se já está sendo transcodificado
-    const jobKey = `${fileId}_${quality}`;
-    if (convertingCloudStreamJobs.has(jobKey)) {
+    const jobKey = `proxy_${fileId}`;
+    if (convertingCloudStreamJobs.has(jobKey) || convertingCloudStreamJobs.has(`${fileId}_${quality}`)) {
       return res.json({ ready: false, percent: 35, converting: true, quality });
     }
 
@@ -4129,8 +4158,8 @@ app.get('/api/stream/video-status', async (req, res) => {
     }
 
     // Se não estiver na fila nem sendo processado, inicia respeitando o lock global de concorrência
-    ensureCloudStreamRendition(fileId, found.video, found.userDb, quality, found.project).catch(err => {
-      console.warn(`[CloudStream] Aviso ao gerar rendição sob demanda ${quality}:`, err.message);
+    ensureCloudStreamProxy(fileId, found.video, found.userDb, found.project).catch(err => {
+      console.warn(`[CloudStream] Aviso ao gerar proxy sob demanda ${quality}:`, err.message);
     });
 
     return res.json({ ready: false, percent: 10, converting: true, quality });
@@ -4418,46 +4447,25 @@ app.get('/api/stream', async (req, res) => {
 
     const quality = String(req.query.quality || 'original').toLowerCase();
 
-    // Se qualidade específica foi solicitada (1080p, 720p, 360p)
-    if (quality !== 'original') {
+    // Se qualidade Proxy foi solicitada
+    if (quality === 'proxy' || quality === '1080p' || quality === '720p' || quality === '360p') {
       const isAlpha = Boolean(video?.isAlpha);
       const ext = isAlpha ? 'webm' : 'mp4';
       const contentType = isAlpha ? 'video/webm' : 'video/mp4';
-      const cacheDir = isAlpha ? ALPHA_CACHE_DIR : WEB_VIDEO_CACHE_DIR;
-      const cachePath = path.join(cacheDir, `${fileId}_${quality}.${ext}`);
 
-      // 1. Servir do cache local se disponível
-      if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 0) {
-        return streamLocalRangeFile(req, res, cachePath, contentType);
-      }
-
-      // 2. Servir do Drive .cloud_stream se disponível
-      const cloudFileId = video?.cloudStream?.renditions?.[quality];
+      // 1. Servir do Drive .cloud_stream se disponível
+      const cloudFileId = video?.cloudStream?.renditions?.proxy || video?.cloudStream?.renditions?.[quality] || video?.cloudStream?.renditions?.['1080p'];
       if (cloudFileId) {
         return driveApi.streamFile(req, res, userDb, cloudFileId, {
           download: false,
-          fileName: `stream_${quality}.${ext}`,
+          fileName: `stream_proxy_${fileId}.${ext}`,
           mimeType: contentType
         }).catch(err => {
-          console.warn('[Stream] Falha no stream do Drive .cloud_stream, tentando original:', err.message);
+          console.warn('[Stream] Falha no stream do Drive .cloud_stream, usando original:', err.message);
         });
       }
 
-      // 3. Tenta obter ou gerar rendição
-      try {
-        const readyPath = await ensureCloudStreamRendition(fileId, video, userDb, quality, project);
-        if (readyPath && typeof readyPath === 'string' && fs.existsSync(readyPath) && fs.statSync(readyPath).size > 0) {
-          return streamLocalRangeFile(req, res, readyPath, contentType);
-        } else if (readyPath && readyPath.cloudDriveId) {
-          return driveApi.streamFile(req, res, userDb, readyPath.cloudDriveId, {
-            download: false,
-            fileName: `stream_${quality}.${ext}`,
-            mimeType: contentType
-          });
-        }
-      } catch (err) {
-        console.error(`Falha ao gerar rendição ${quality}:`, err.message);
-      }
+      // Se o proxy ainda não está pronto, prossegue abaixo e serve a versão Original diretamente com stream contínuo (sem erros nem interrupções)
     }
 
     // REPRODUÇÃO ORIGINAL (Padrão)

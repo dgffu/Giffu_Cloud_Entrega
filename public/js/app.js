@@ -1076,10 +1076,14 @@ class SyncQueueManagerUI {
       if (currentActiveId && currentActiveId === prevActiveId && prevCount === this.totalCount) {
         const pctEl = document.getElementById('syncActivePercentText');
         const barEl = document.getElementById('syncActiveProgressBar');
+        const statusEl = document.getElementById('syncActiveStatusText');
         if (pctEl && barEl) {
           const pct = Math.min(100, Math.max(0, this.activeItem.percent || 0));
           pctEl.textContent = `${pct}%`;
           barEl.style.width = `${pct}%`;
+          if (statusEl && this.activeItem.statusText) {
+            statusEl.textContent = this.activeItem.statusText;
+          }
           return;
         }
       }
@@ -1230,7 +1234,7 @@ class SyncQueueManagerUI {
             <div class="sync-progress-fill" id="syncActiveProgressBar" style="width: ${pct}%; background-color: ${brandColor};"></div>
           </div>
           <div class="sync-item-meta">
-            <span class="sync-item-status">Processando na nuvem (${pct}%)</span>
+            <span class="sync-item-status" id="syncActiveStatusText">${this.app.escapeHtml(this.activeItem.statusText || `Processando na nuvem (${pct}%)`)}</span>
           </div>
         </div>
       `;
@@ -1253,7 +1257,7 @@ class SyncQueueManagerUI {
             <div class="sync-progress-fill" style="width: 0%; background-color: ${brandColor};"></div>
           </div>
           <div class="sync-item-meta">
-            <span class="sync-item-status">Na fila</span>
+            <span class="sync-item-status">${this.app.escapeHtml(item.statusText || 'Na fila da nuvem')}</span>
           </div>
         </div>
       `;

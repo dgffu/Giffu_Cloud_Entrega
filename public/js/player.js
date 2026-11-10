@@ -20,6 +20,9 @@ class CustomVideoPlayer {
     this.alphaBgMode = this.isAlpha ? 'checkerboard' : 'black';
     this._userMutedIntentionally = false;
     this.audioHealthTimer = null;
+    this._playbackBufferStalls = [];
+    this._isBufferingStallActive = false;
+    this._hasShownSlowConnectionPrompt = false;
 
     this.init();
   }
@@ -447,6 +450,9 @@ class CustomVideoPlayer {
         this.container?.classList.add('is-buffering');
         const loadingEl = this.container ? this.container.querySelector('#playerCenterLoading') : null;
         if (loadingEl) loadingEl.style.display = 'flex';
+        if (this.isPlaying && !this.isSeeking) {
+          this.handlePlaybackStall();
+        }
       }
     };
 
@@ -1071,6 +1077,9 @@ class CustomVideoPlayer {
       }
       this.setBuffering(true, false);
       this.updateBufferProgress();
+      if (this.isPlaying && !this.isSeeking && !this.video.paused) {
+        this.handlePlaybackStall();
+      }
     });
 
     this.video.addEventListener('stalled', () => {
@@ -1081,6 +1090,7 @@ class CustomVideoPlayer {
     });
 
     this.video.addEventListener('seeking', () => {
+      this._isBufferingStallActive = false;
       if (this.isPlaying) {
         this.setBuffering(true, false);
       }
@@ -1103,6 +1113,7 @@ class CustomVideoPlayer {
       this.isPlaying = true;
       this._networkRetryCount = 0;
       this.setBuffering(false);
+      this._isBufferingStallActive = false;
       this.resyncAudio(false);
       this.updateBufferProgress();
     });
@@ -1207,6 +1218,7 @@ class CustomVideoPlayer {
     this.video.addEventListener('pause', () => {
       this.isPlaying = false;
       this.setBuffering(false);
+      this._isBufferingStallActive = false;
       this.showHUD();
       this.container.classList.add('paused');
       this.playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
@@ -1236,6 +1248,9 @@ class CustomVideoPlayer {
       if (this.isBuffering && !this.video.paused) {
         this._mobileWaitingForCushion = false;
         this.setBuffering(false);
+      }
+      if (!this.video.paused && !this.isBuffering) {
+        this._isBufferingStallActive = false;
       }
       this.updateBufferProgress(true);
       if (this.isSeeking) return;
@@ -1578,6 +1593,89 @@ class CustomVideoPlayer {
     };
 
     window.addEventListener('keydown', this.keyHandler);
+  }
+
+  handlePlaybackStall() {
+    if (this._hasShownSlowConnectionPrompt) return;
+    if (this._isBufferingStallActive) return;
+    this._isBufferingStallActive = true;
+
+    const now = Date.now();
+    const curVideoTime = this.video ? (this.video.currentTime || 0) : 0;
+
+    // Filtra ocorrências anteriores ocorridas a mais de 30 segundos de reprodução
+    this._playbackBufferStalls = (this._playbackBufferStalls || []).filter(item => {
+      const wallDelta = (now - item.timestamp) / 1000;
+      const videoDelta = Math.abs(curVideoTime - item.videoTime);
+      return wallDelta <= 45 && videoDelta <= 30;
+    });
+
+    this._playbackBufferStalls.push({
+      timestamp: now,
+      videoTime: curVideoTime
+    });
+
+    if (this._playbackBufferStalls.length >= 2) {
+      this._hasShownSlowConnectionPrompt = true;
+      this.showSlowConnectionPrompt();
+    }
+  }
+
+  showSlowConnectionPrompt() {
+    if (!this.container) return;
+    const existing = this.container.querySelector('#slowConnectionPrompt');
+    if (existing) return;
+
+    const banner = document.createElement('div');
+    banner.className = 'player-slow-connection-banner';
+    banner.id = 'slowConnectionPrompt';
+    banner.innerHTML = `
+      <div class="slow-connection-content">
+        <div class="slow-connection-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        </div>
+        <div class="slow-connection-text">
+          A conexão entre internet-servidor está afetando a reprodução. Faça o download para assistir com mais tranquilidade.
+        </div>
+      </div>
+      <div class="slow-connection-actions">
+        <button class="slow-connection-btn slow-connection-btn-no" id="btnSlowConnNo">Não</button>
+        <button class="slow-connection-btn slow-connection-btn-download" id="btnSlowConnDownload">Baixar</button>
+      </div>
+    `;
+
+    this.container.appendChild(banner);
+
+    const closeBanner = () => {
+      banner.classList.add('is-closing');
+      setTimeout(() => {
+        banner.remove();
+      }, 250);
+    };
+
+    const btnNo = banner.querySelector('#btnSlowConnNo');
+    if (btnNo) {
+      btnNo.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeBanner();
+      });
+    }
+
+    const btnDownload = banner.querySelector('#btnSlowConnDownload');
+    if (btnDownload) {
+      btnDownload.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeBanner();
+        const downloadFileName = this.videoData.fileName || (this.videoData.title + (this.isMov ? '.mov' : '.mp4'));
+        const downloadUrl = `${this.videoData.url}${this.videoData.url.includes('?') ? '&' : '?'}download=1`;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = downloadFileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      });
+    }
   }
 
   captureCurrentFrame() {

@@ -2380,10 +2380,6 @@ body.photo-fullscreen-active .floating-theme-toggle {
 }
 
 .slow-connection-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: rgba(255, 84, 0, 0.14);
   color: var(--brand-orange, #ff5400);
   display: flex;
   align-items: center;
@@ -2392,8 +2388,8 @@ body.photo-fullscreen-active .floating-theme-toggle {
 }
 
 .slow-connection-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   fill: currentColor;
 }
 

@@ -2408,6 +2408,10 @@ body.photo-fullscreen-active .floating-theme-toggle {
 }
 
 .slow-connection-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
   font-family: inherit;
   font-size: 0.85rem;
   padding: 8px 16px;

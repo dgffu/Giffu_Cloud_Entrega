@@ -1626,6 +1626,9 @@ class CustomVideoPlayer {
     const existing = this.container.querySelector('#slowConnectionPrompt');
     if (existing) return;
 
+    const downloadFileName = this.videoData.fileName || (this.videoData.title + (this.isMov ? '.mov' : '.mp4'));
+    const downloadUrl = `${this.videoData.url}${this.videoData.url.includes('?') ? '&' : '?'}download=1`;
+
     const banner = document.createElement('div');
     banner.className = 'player-slow-connection-banner';
     banner.id = 'slowConnectionPrompt';
@@ -1639,8 +1642,8 @@ class CustomVideoPlayer {
         </div>
       </div>
       <div class="slow-connection-actions">
-        <button class="slow-connection-btn slow-connection-btn-no" id="btnSlowConnNo">Não</button>
-        <button class="slow-connection-btn slow-connection-btn-download" id="btnSlowConnDownload">Baixar</button>
+        <button type="button" class="slow-connection-btn slow-connection-btn-no" id="btnSlowConnNo">Não</button>
+        <a class="slow-connection-btn slow-connection-btn-download" id="btnSlowConnDownload" href="${downloadUrl}" download="${downloadFileName}">Baixar</a>
       </div>
     `;
 
@@ -1665,15 +1668,10 @@ class CustomVideoPlayer {
     if (btnDownload) {
       btnDownload.addEventListener('click', (e) => {
         e.stopPropagation();
-        closeBanner();
-        const downloadFileName = this.videoData.fileName || (this.videoData.title + (this.isMov ? '.mov' : '.mp4'));
-        const downloadUrl = `${this.videoData.url}${this.videoData.url.includes('?') ? '&' : '?'}download=1`;
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = downloadFileName;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        try {
+          window.location.href = downloadUrl;
+        } catch (err) {}
+        setTimeout(closeBanner, 200);
       });
     }
   }
